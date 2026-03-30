@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- WIZARD FORM -->
+        <record id="view_appointment_report_wizard_form" model="ir.ui.view">
+            <field name="name">appointment.report.wizard.form</field>
+            <field name="model">appointment.report.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Appointment Report">
+                    <group>
+                        <field name="patient_id"/>
+                        <field name="date_from"/>
+                        <field name="date_to"/>
+                    </group>
+                    <footer>
+                        <button name="action_onscreen_report"
+                                string="Onscreen Report"
+                                type="object"
+                                class="btn-primary"/>
+                        <button name="action_html_report"
+                                string="HTML Report"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_pdf_report"
+                                string="PDF Report"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_excel_report"
+                                string="Excel Report"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button string="Close"
+                                class="btn-secondary"
+                                special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+
+        <!-- WIZARD ACTION -->
+        <record id="action_appointment_report_wizard" model="ir.actions.act_window">
+            <field name="name">Appointment Report</field>
+            <field name="res_model">appointment.report.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+
+        <!-- REPORT TEMPLATE (shared for HTML + PDF) -->
+        <template id="report_appointment_wizard_template">
+            <t t-call="web.html_container">
+                <t t-foreach="docs" t-as="doc">
+                    <t t-call="web.internal_layout">
+                        <div class="page">
+
+                            <h1 style="text-align:center; margin-bottom:20px;">Appointment Report</h1>
+
+                            <!-- TOP SECTION: Patient Info (left) | Doctor Info (right) -->
+                            <table style="width:100%; margin-bottom:30px;">
+                                <tr>
+                                    <!-- PATIENT INFORMATION -->
+                                    <td style="width:50%; vertical-align:top; padding-right:20px;">
+                                        <h3 style="border-bottom:2px solid #333; padding-bottom:5px;">
+                                            Patient Information
+                                        </h3>
+                                        <table style="width:100%;">
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold; width:40%;">Name</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].patient_name if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Phone</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].phone_number if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Email</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].email if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Age</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].patient_age if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Address</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].patient_address if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+
+                                    <!-- DOCTOR INFORMATION -->
+                                    <td style="width:50%; vertical-align:top; padding-left:20px;
+                                               border-left:1px solid #ccc;">
+                                        <h3 style="border-bottom:2px solid #333; padding-bottom:5px;">
+                                            Doctor Information
+                                        </h3>
+                                        <table style="width:100%;">
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold; width:40%;">Name</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].doctor_name if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Speciality</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].specialty_of_doctor if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Phone</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].doctor_phone if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Email</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].doctor_email if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:4px; font-weight:bold;">Fees</td>
+                                                <td style="padding:4px;">
+                                                    <t t-esc="doc.appointment_line_ids[0].doctor_fees if doc.appointment_line_ids else ''"/>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- APPOINTMENT DETAILS TABLE -->
+                            <h3 style="border-bottom:2px solid #333; padding-bottom:5px;">
+                                Appointment Details
+                            </h3>
+                            <table style="width:100%; border:1px solid black;
+                                          border-collapse:collapse; margin-top:10px;">
+                                <thead>
+                                    <tr style="background-color:#e6e6e6;">
+                                        <th style="border:1px solid black; padding:8px;">S.No</th>
+                                        <th style="border:1px solid black; padding:8px;">Appointment Code</th>
+                                        <th style="border:1px solid black; padding:8px;">Notes</th>
+                                        <th style="border:1px solid black; padding:8px;">Status</th>
+                                        <th style="border:1px solid black; padding:8px;">Total Payment</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <t t-foreach="doc.appointment_line_ids" t-as="line">
+                                        <tr>
+                                            <td style="border:1px solid black; padding:8px; text-align:center;">
+                                                <t t-esc="line_index + 1"/>
+                                            </td>
+                                            <td style="border:1px solid black; padding:8px;">
+                                                <t t-esc="line.appointment_code"/>
+                                            </td>
+                                            <td style="border:1px solid black; padding:8px;">
+                                                <t t-esc="line.specialty_of_doctor"/>
+                                            </td>
+                                            <td style="border:1px solid black; padding:8px;">
+                                                <t t-esc="line.notes"/>
+                                            </td>
+                                            <td style="border:1px solid black; padding:8px; text-align:center;">
+                                                <t t-esc="line.status"/>
+                                            </td>
+                                            <td style="border:1px solid black; padding:8px; text-align:right;">
+                                                <t t-esc="line.total_payment"/>
+                                            </td>
+                                        </tr>
+                                    </t>
+                                </tbody>
+                                <tfoot>
+                                    <tr style="background-color:#e6e6e6; font-weight:bold;">
+                                        <td colspan="5"
+                                            style="border:1px solid black; padding:8px; text-align:right;">
+                                            Total
+                                        </td>
+                                        <td style="border:1px solid black; padding:8px; text-align:right;">
+                                            <t t-esc="sum(doc.appointment_line_ids.mapped('total_payment'))"/>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+
+                            <div style="margin-top:40px; text-align:center; font-size:13px;">
+                                <p>Thank you for reviewing the appointment report.</p>
+                            </div>
+
+                        </div>
+                    </t>
+                </t>
+            </t>
+        </template>
+
+        <!-- HTML REPORT ACTION -->
+        <record id="action_report_appointment_wizard_html" model="ir.actions.report">
+            <field name="name">Appointment Report (HTML)</field>
+            <field name="model">appointment.report.wizard</field>
+            <field name="report_type">qweb-html</field>
+            <field name="report_name">clinic_managment.report_appointment_wizard_template</field>
+            <field name="report_file">clinic_managment.report_appointment_wizard_template</field>
+            <field name="binding_model_id" ref="model_appointment_report_wizard"/>
+        </record>
+
+        <!-- PDF REPORT ACTION -->
+        <record id="action_report_appointment_wizard_pdf" model="ir.actions.report">
+            <field name="name">Appointment Report (PDF)</field>
+            <field name="model">appointment.report.wizard</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">clinic_managment.report_appointment_wizard_template</field>
+            <field name="report_file">appointment_report</field>
+            <field name="binding_model_id" ref="model_appointment_report_wizard"/>
+        </record>
+
+    </data>
+</odoo>

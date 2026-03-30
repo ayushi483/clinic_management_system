@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- LIST VIEW -->
+        <record id="view_res_prescription_list" model="ir.ui.view">
+            <field name="name">res.prescription.list</field>
+            <field name="model">res.prescription</field>
+            <field name="arch" type="xml">
+                <list>
+                    <field name="consultation_id"/>
+                    <field name="medicine_id"/>
+                    <field name="dosage"/>
+                    <field name="frequency"/>
+                    <field name="duration"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- ACTION -->
+        <record id="action_res_prescription" model="ir.actions.act_window">
+            <field name="name">Prescriptions</field>
+            <field name="res_model">res.prescription</field>
+            <field name="view_mode">list</field>
+        </record>
+    </data>
+</odoo>
