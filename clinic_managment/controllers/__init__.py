@@ -1,3 +1,7 @@
 from . import base_controller
 from . import patient_controller
 from . import doctor_controller
+from . import speciality_controller
+from . import logging_patient
+from . import registration_patient
+from . import appointment_controller

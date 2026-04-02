@@ -10,13 +10,13 @@ class Patient(models.Model):
     _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'id desc'
 
-    name = fields.Char(string="Name" , tracking = True)
-    age = fields.Integer(string="Age", compute='_compute_age' , tracking=True)
+    name = fields.Char(string="Name", tracking=True)
+    age = fields.Integer(string="Age", compute='_compute_age', tracking=True)
     gender = fields.Selection([
         ('male', 'Male'),
         ('female', 'Female'),
         ('other', 'Other')
-    ], string="Gender" , tracking= True)
+    ], string="Gender", tracking=True)
     email = fields.Char(string="Email")
     phone = fields.Char(string="Phone")
     address = fields.Text(string="Address")
@@ -39,7 +39,6 @@ class Patient(models.Model):
     image_1920 = fields.Image()
     active = fields.Boolean(default=True, string="Active")
 
-
     @api.depends('date_of_birth')
     def _compute_age(self):
         for rec in self:
@@ -61,6 +60,7 @@ class Patient(models.Model):
             if not vals.get('patient_code'):
                 vals['patient_code'] = self.env['ir.sequence'].next_by_code('clinic.patient') or _('New')
 
+            # create partner
             partner = self.env['res.partner'].create({
                 'name': vals.get('name'),
                 'email': vals.get('email'),
@@ -69,8 +69,46 @@ class Patient(models.Model):
 
             vals['partner_id'] = partner.id
 
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        records.action_grant_access()
 
+        return records
+
+    def action_grant_access(self):
+        for rec in self:
+            partner = rec.partner_id
+
+            if not partner or not partner.email:
+                continue
+
+            Users = self.env['res.users'].sudo()
+
+            user = Users.search([
+                '|',
+                ('partner_id', '=', partner.id),
+                ('login', '=', partner.email)
+            ], limit=1)
+
+            if user and user.partner_id != partner:
+                user.partner_id = partner
+
+
+            if not user:
+                company = partner.company_id or self.env.company
+                user = Users.with_company(company.id).create({
+                    'name': partner.name,
+                    'login': partner.email,
+                    'partner_id': partner.id,
+                })
+
+                user.action_reset_password()
+
+            group_portal = self.env.ref('base.group_portal')
+
+            user.write({
+                'active': True,
+                'group_ids': [(6, 0, [group_portal.id])]
+            })
 
     @api.onchange('phone')
     def _onchange_phone(self):

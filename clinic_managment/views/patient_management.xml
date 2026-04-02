@@ -43,20 +43,31 @@
                         />
                     </header>
                     <sheet>
-                        <div class="oe_title">
-                            <label for="patient_code" string="Patient ID"/>
-                            <h1>
-                                <field name="patient_code" placeholder="Auto-generated on save..." readonly="1"/>
-                            </h1>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+
+                            <div class="oe_title">
+                                <label for="patient_code" string="Patient ID"/>
+                                <h1>
+                                    <field name="patient_code"
+                                           placeholder="Auto-generated on save..."
+                                           readonly="1"/>
+                                </h1>
+                            </div>
+
+                            <!-- Right: Image -->
+                            <field name="image_1920"
+                                   widget="image"
+                                   class="oe_avatar"
+                                   style="width: 100px; height: 100px;"/>
+
                         </div>
-                        <field name="image_1920" widget="image" class="oe_avatar"/>
 
                         <group>
                             <group string=" Basic Information">
                                 <field name="name"/>
-                                <field name="age"/>
                                 <field name="gender"/>
                                 <field name="date_of_birth"/>
+                                <field name="age"/>
                             </group>
 
                             <group string="Contact Details">

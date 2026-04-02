@@ -23,8 +23,7 @@ class ClinicDashboard(models.Model):
 
             # Get today's date in the user's timezone, then convert boundaries to UTC
             tz = pytz.timezone(self.env.user.tz or 'UTC')
-            now_user = datetime.now(tz)
-
+            now_user = fields.Datetime.context_timestamp(self, fields.Datetime.now())
             today_start_user = now_user.replace(hour=0, minute=0, second=0, microsecond=0)
             today_end_user = now_user.replace(hour=23, minute=59, second=59, microsecond=0)
 

@@ -91,7 +91,8 @@
                             <group string="Patient Information">
                                 <field name="patient_id"
                                        readonly="status in ['confirmed', 'cancel', 'no_show']"
-                                       options="{'no_open': True, 'no_create': True}"/>
+                                       options="{'no_open': True, 'no_create': True}"
+                                       required="1"/>
                                 <field name="patient_gender" readonly="1"/>
                                 <field name="patient_phone" readonly="1"/>
                                 <field name="patient_email" readonly="1"/>
@@ -101,7 +102,8 @@
                             <group string="Doctor Information">
                                 <field name="doctor_id"
                                        readonly="status in ['confirmed', 'cancel', 'no_show']"
-                                       options="{'no_open': True, 'no_create': True}"/>
+                                       options="{'no_open': True, 'no_create': True}"
+                                       required="1"/>
                                 <field name="doctor_fees" readonly="1"/>
                                 <field name="doctor_speciality" readonly="1"/>
                                 <field name="doctor_phone" readonly="1"/>
