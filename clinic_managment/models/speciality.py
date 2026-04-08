@@ -11,5 +11,8 @@ class Speciality(models.Model):
     name = fields.Char(string="Speciality")
     description = fields.Text(string="Description")
     active = fields.Boolean(default=True, string="Active")
+    image = fields.Image(max_width=256, max_height=256)
+
+
 
 

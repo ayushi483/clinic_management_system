@@ -29,6 +29,8 @@ class Doctor(models.Model):
         'doctor_id',
         string="Consultations"
     )
+    image_1024 = fields.Image(max_width=256, max_height=256)
+
 
     # ✅ Moved here — phone/email belong to clinic.doctor, not DoctorLine
     @api.onchange('phone')

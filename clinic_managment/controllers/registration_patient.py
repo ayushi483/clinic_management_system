@@ -14,7 +14,6 @@ class PatientRegistrationAPI(BaseAPIController):
     @http.route('/api/v19/patient/register', type='http', auth='public', methods=['POST'], csrf=False)
     def patient_register(self, **kwargs):
         try:
-
             raw_data = request.httprequest.get_data(as_text=True)
 
             if raw_data:
@@ -32,7 +31,11 @@ class PatientRegistrationAPI(BaseAPIController):
             required_fields = ["name", "mobile", "gender", "password"]
             for field in required_fields:
                 if not data.get(field):
-                    return self._error_response(f"{field} is required", f"MISSING_{field.upper()}", 400)
+                    return self._error_response(
+                        f"{field} is required",
+                        f"MISSING_{field.upper()}",
+                        400
+                    )
 
             dob_raw = data.get("dob")
             age_years = data.get("age_years")
@@ -40,7 +43,7 @@ class PatientRegistrationAPI(BaseAPIController):
             if dob_raw:
                 try:
                     dob = datetime.strptime(dob_raw, "%Y-%m-%d").date()
-                except:
+                except Exception:
                     return self._error_response("Invalid DOB format", "INVALID_DOB", 400)
             elif age_years:
                 age_years = int(age_years)
@@ -48,47 +51,82 @@ class PatientRegistrationAPI(BaseAPIController):
             else:
                 return self._error_response("Provide dob or age_years", "MISSING_DOB", 400)
 
-            email = data.get("email", "")
-            mobile = data.get("mobile")
+            email = data.get("email", "").strip()
+            mobile = data.get("mobile", "").strip()
 
+            if email:
+                existing_user = request.env['res.users'].sudo().search([
+                    ('email', '=', email)
+                ], limit=1)
+                if existing_user:
+                    return self._error_response("Email already registered", "EMAIL_EXISTS", 400)
 
-            login = f"{mobile}_{int(datetime.now().timestamp())}"
-
+            existing_patient = request.env['clinic.patient'].sudo().search([
+                ('phone', '=', mobile)
+            ], limit=1)
+            if existing_patient:
+                return self._error_response("Mobile number already registered", "MOBILE_EXISTS", 400)
 
             company = request.env["res.company"].sudo().search([], limit=1)
             if not company:
                 return self._error_response("No company found", "NO_COMPANY", 500)
 
-            user_env = request.env(user=1)
+            portal_group = request.env.ref("base.group_portal")
+            internal_group = request.env.ref("base.group_user")
 
-            user_vals = {
+            # Step 1: Create user (no group fields in create)
+            user = request.env["res.users"].sudo().with_context(
+                no_reset_password=True
+            ).create({
                 "name": data.get("name"),
-                "login": login,
+                "login": email or mobile,
                 "password": data.get("password"),
                 "email": email,
                 "company_id": company.id,
                 "company_ids": [(4, company.id)],
-            }
+            })
 
-            user = user_env["res.users"].sudo().create(user_vals)
+            # Step 2: Assign portal group via group_ids on res.users (Odoo 19)
+            # group_ids is the correct writable field on res.users AFTER creation
+            user.sudo().write({
+                'group_ids': [
+                    (4, portal_group.id),    # add portal
+                    (3, internal_group.id),  # remove internal
+                ]
+            })
 
-            portal_group = request.env.ref("base.group_portal")
-            request.env.cr.execute(
-                "INSERT INTO res_groups_users_rel (gid, uid) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                (portal_group.id, user.id)
+            # Step 3: Sync partner fields
+            user.partner_id.sudo().write({
+                'email': email,
+                'phone': mobile,
+                'name': data.get("name"),
+            })
+
+            _logger.info(
+                f"Portal user created: id={user.id}, login={user.login}, "
+                f"email={user.email}, partner_id={user.partner_id.id}"
             )
 
-            patient_vals = {
-                "name": data.get("name"),
-                "phone": mobile,
-                "email": email,
-                "gender": data.get("gender"),
-                "date_of_birth": dob,
-                "partner_id": user.partner_id.id,
-            }
+            # Step 4: Create patient
+            existing_patient_for_partner = request.env["clinic.patient"].sudo().search([
+                ('partner_id', '=', user.partner_id.id)
+            ], limit=1)
 
-            patient = request.env["clinic.patient"].sudo().create(patient_vals)
+            if existing_patient_for_partner:
+                patient = existing_patient_for_partner
+            else:
+                patient = request.env["clinic.patient"].sudo().create({
+                    "name": data.get("name"),
+                    "phone": mobile,
+                    "email": email,
+                    "gender": data.get("gender"),
+                    "date_of_birth": dob,
+                    "partner_id": user.partner_id.id,
+                })
+
             patient.action_confirm()
+
+            _logger.info(f"Patient created: id={patient.id}, partner_id={patient.partner_id.id}")
 
             api_key, error = self._generate_api_key(user, prefix="Patient")
             if error:

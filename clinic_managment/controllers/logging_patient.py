@@ -13,10 +13,9 @@ class PatientLoggingAPI(BaseAPIController):
     @http.route('/api/v19/patient/login', type='http', auth='none', methods=['POST'], csrf=False)
     def patient_login(self, **kwargs):
         try:
-
             raw_data = request.httprequest.get_data(as_text=True)
             _logger.info(f"Patient login request received")
-            _logger.info(f"Raw data type: {type(raw_data)}, value: {raw_data}")
+            _logger.info(f"Raw data: {raw_data}")
 
             try:
                 if raw_data:
@@ -39,17 +38,14 @@ class PatientLoggingAPI(BaseAPIController):
                         400
                     )
 
-                _logger.info(f"Parsed data type: {type(data)}, value: {data}")
-
             except (ValueError, TypeError, json.JSONDecodeError) as e:
                 _logger.error(f"JSON parsing error: {str(e)}")
                 return self._error_response("Invalid JSON format", "INVALID_JSON", 400)
 
-
-            login = data.get('email') or data.get('mobile')
+            login_input = data.get('email') or data.get('mobile')
             password = data.get('password')
 
-            if not login:
+            if not login_input:
                 return self._error_response(
                     "Email or Mobile is required",
                     "MISSING_LOGIN",
@@ -63,26 +59,55 @@ class PatientLoggingAPI(BaseAPIController):
                     400
                 )
 
+            password = str(password)
+
+            # ── Search user by email or login ─────────────────────────────
+            user = request.env['res.users'].sudo().search([
+                '|',
+                ('email', '=', login_input),
+                ('login', '=', login_input),
+            ], limit=1)
+
+            # ── Fallback: search by partner email ─────────────────────────
+            if not user:
+                partner = request.env['res.partner'].sudo().search([
+                    ('email', '=', login_input)
+                ], limit=1)
+                if partner:
+                    user = request.env['res.users'].sudo().search([
+                        ('partner_id', '=', partner.id)
+                    ], limit=1)
+
+            # ── Fallback: search by partner phone (mobile login) ──────────
+            if not user:
+                partner = request.env['res.partner'].sudo().search([
+                    ('phone', '=', login_input)
+                ], limit=1)
+                if partner:
+                    user = request.env['res.users'].sudo().search([
+                        ('partner_id', '=', partner.id)
+                    ], limit=1)
+
+            _logger.info(
+                f"Login attempt: input={login_input}, "
+                f"found user id={user.id if user else None}, "
+                f"user login={user.login if user else None}, "
+                f"user email={user.email if user else None}, "
+                f"partner email={user.partner_id.email if user else None}"
+            )
+
+            if not user:
+                return self._error_response(
+                    "Patient not found",
+                    "PATIENT_NOT_FOUND",
+                    404
+                )
 
             try:
-                user = request.env['res.users'].sudo().search([
-                    '|',
-                    ('email', '=', login),
-                    ('login', '=', login),
-                ], limit=1)
-
-                if not user:
-                    return self._error_response(
-                        "Invalid credentials",
-                        "AUTH_FAILED",
-                        401
-                    )
-
                 user.with_env(request.env(user=user.id)).sudo()._check_credentials(
                     {'password': password, 'type': 'password'},
                     {'interactive': False}
                 )
-
             except AccessDenied:
                 return self._error_response(
                     "Invalid credentials",
@@ -90,14 +115,31 @@ class PatientLoggingAPI(BaseAPIController):
                     401
                 )
 
-
+            # ── Search patient by partner_id (primary) ────────────────────
             patient = request.env['clinic.patient'].sudo().search([
                 ('partner_id', '=', user.partner_id.id)
             ], limit=1)
 
+            # ── Fallback: search by phone ─────────────────────────────────
+            if not patient:
+                patient = request.env['clinic.patient'].sudo().search([
+                    ('phone', '=', login_input)
+                ], limit=1)
+
+            # ── Fallback: search by email ─────────────────────────────────
+            if not patient and user.email:
+                patient = request.env['clinic.patient'].sudo().search([
+                    ('email', '=', user.email)
+                ], limit=1)
+
+            _logger.info(
+                f"Patient lookup: partner_id={user.partner_id.id}, "
+                f"found patient id={patient.id if patient else None}"
+            )
+
             if not patient:
                 return self._error_response(
-                    "Patient not found",
+                    "Patient record not found for this account",
                     "PATIENT_NOT_FOUND",
                     404
                 )

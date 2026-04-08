@@ -2,9 +2,9 @@ from odoo import http
 from odoo.http import request
 from .base_controller import BaseAPIController
 import logging
+import base64
 
 _logger = logging.getLogger(__name__)
-
 
 class SpecialityApi(BaseAPIController):
 
@@ -20,11 +20,20 @@ class SpecialityApi(BaseAPIController):
 
             speciality_list = []
             for s in speciality:
+                image_base64 = None
+                try:
+                    if s.image:
+                        # s.image is already base64 in Odoo, just decode to string
+                        image_base64 = s.image.decode('utf-8')
+                except Exception:
+                    image_base64 = None
+
                 speciality_list.append({
                     'id': s.id,
                     'name': s.name or '',
                     'description': s.description or '',
                     'active': s.active,
+                    'image': image_base64,
                 })
 
             response_data = {
@@ -39,3 +48,4 @@ class SpecialityApi(BaseAPIController):
         except Exception as e:
             _logger.exception("Error fetching Speciality list")
             return self._error_response(str(e))
+
