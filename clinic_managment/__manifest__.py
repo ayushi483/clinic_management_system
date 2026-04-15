@@ -30,11 +30,10 @@
 
         'report/appointment_report.xml',
 
-        #wizard
+        # Wizard
         'wizard/appointment_wizard.xml',
-        
-        # Views
 
+        # Views
         'views/patient_management.xml',
         'views/doctor_managment.xml',
         'views/appointment_management.xml',
@@ -50,6 +49,14 @@
     ],
 
     'demo': [],
+
+    'assets': {
+        'web.assets_backend': [
+            'clinic_managment/static/src/css/chatbot.css',
+            'clinic_managment/static/src/xml/chatbot_template.xml',
+            'clinic_managment/static/src/js/chatbot_widget.js',
+        ],
+    },
 
     'installable': True,
     'application': True,

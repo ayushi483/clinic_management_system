@@ -113,9 +113,6 @@ class Appointment(models.Model):
         for rec in self:
             rec.invoice_count = count_map.get(rec.appointment_code, 0)
 
-    # ─────────────────────────────────────────────
-    # CONSTRAINTS / VALIDATIONS
-    # ─────────────────────────────────────────────
 
     @api.constrains('doctor_id', 'appointment_datetime')
     def _check_doctor_availability(self):

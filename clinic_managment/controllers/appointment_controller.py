@@ -177,8 +177,6 @@ class AppointmentAPI(BaseAPIController):
             _logger.exception("Error fetching cancelled appointments")
             return self._error_response(repr(e), "INTERNAL_SERVER_ERROR", 500)
 
-
-
     @http.route('/api/v19/appointments/draft', type='http', auth='none', methods=['GET'], csrf=False)
     def get_draft_appointments(self, **kwargs):
         try:

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+<t t-name="clinic_managment.ClinicChatbot" owl="1">
+    <div class="clinic-chatbot-wrapper">
+
+        <!-- Floating trigger button -->
+        <button class="chatbot-fab"
+                t-att-class="state.open ? 'chatbot-fab--open' : ''"
+                t-on-click="toggleChat">
+            <span t-if="!state.open">💬</span>
+            <span t-if="state.open">✕</span>
+        </button>
+
+        <!-- Chat panel -->
+        <div t-if="state.open" class="chatbot-panel">
+
+            <!-- Header -->
+            <div class="chatbot-header">
+                <div class="chatbot-avatar">🩺</div>
+                <div class="chatbot-header-info">
+                    <div class="chatbot-header-name">Clinic Assistant</div>
+                    <div class="chatbot-header-status">
+                        <span class="chatbot-status-dot"/>
+                        Always here to help
+                    </div>
+                </div>
+                <div class="chatbot-header-actions">
+                    <!-- Back button: resets to welcome screen -->
+                    <button class="chatbot-hbtn" t-on-click="clearChat" title="Back to start">←</button>
+                    <!-- Close button -->
+                    <button class="chatbot-hbtn" t-on-click="toggleChat" title="Close">✕</button>
+                </div>
+            </div>
+
+            <!-- Messages -->
+            <div class="chatbot-messages" t-ref="messages">
+
+                <!-- Quick action chips — only show on welcome screen -->
+                <t t-if="state.messages.length &lt;= 1">
+                    <div class="chatbot-chips">
+                        <span class="chatbot-chip"
+                              t-on-click="sendQuickAction"
+                              data-action="I want to book an appointment">
+                            📅 Book Appointment
+                        </span>
+                        <span class="chatbot-chip"
+                              t-on-click="sendQuickAction"
+                              data-action="Show me appointment records for a patient">
+                            📋 View Records
+                        </span>
+                        <span class="chatbot-chip"
+                              t-on-click="sendQuickAction"
+                              data-action="Check doctor availability">
+                            🕐 Check Availability
+                        </span>
+                    </div>
+                </t>
+
+                <!-- Message bubbles -->
+                <t t-foreach="state.messages" t-as="msg" t-key="msg_index">
+                    <div t-att-class="'chatbot-msg chatbot-msg--' + msg.role">
+                        <t t-if="msg.role === 'assistant'">
+                            <div class="chatbot-bot-avatar">🩺</div>
+                        </t>
+                        <!-- t-out renders formatted HTML safely (escaped then markup applied) -->
+                        <div class="chatbot-bubble" t-out="formatText(msg.text)"/>
+                        <t t-if="msg.role === 'user'">
+                            <div class="chatbot-user-avatar">👤</div>
+                        </t>
+                    </div>
+                </t>
+
+                <!-- Typing indicator -->
+                <t t-if="state.loading">
+                    <div class="chatbot-msg chatbot-msg--assistant">
+                        <div class="chatbot-bot-avatar">🩺</div>
+                        <div class="chatbot-bubble chatbot-bubble--typing">
+                            <span/><span/><span/>
+                        </div>
+                    </div>
+                </t>
+
+            </div>
+
+            <!-- Input bar -->
+            <div class="chatbot-inputbar">
+                <button
+                    t-att-class="state.listening ? 'chatbot-micbtn chatbot-micbtn--active' : 'chatbot-micbtn'"
+                    t-on-click="toggleVoice"
+                    title="Voice input">🎤</button>
+                <input
+                    t-ref="input"
+                    class="chatbot-input"
+                    placeholder="Type or speak your request..."
+                    t-att-value="state.message"
+                    t-on-input="onInputChange"
+                    t-on-keydown="onInputKeydown"
+                />
+                <button class="chatbot-sendbtn" t-on-click="sendMessage">➤</button>
+            </div>
+
+        </div>
+    </div>
+</t>
+
+</templates>

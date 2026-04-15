@@ -26,8 +26,8 @@ class DoctorAPI(BaseAPIController):
                     'email': d.email or '',
                     'fees': d.fees or 0,
                     'image_1024': d.image_1024.decode('utf-8') if d.image_1024 else None,
-                    'speciality': d.speciality_id.name if d.speciality_id else '',  # ✅ added
-                    'speciality_id': d.speciality_id.id if d.speciality_id else None,  # ✅ added
+                    'speciality': d.speciality_id.name if d.speciality_id else '',
+                    'speciality_id': d.speciality_id.id if d.speciality_id else None,
                     'total_appointment': d.total_appointment or 0,
                     'available': d.is_available or False,
                 })
@@ -43,7 +43,8 @@ class DoctorAPI(BaseAPIController):
         except Exception as e:
             _logger.exception("Error fetching doctor list")
             return self._error_response(str(e), "INTERNAL_SERVER_ERROR", 500)
-    @http.route('/api/v19/doctor/info', type='http', auth='none', methods=['POST'], csrf=False)
+
+    @http.route('/api/v19/doctor/info', type='http', auth='public', methods=['POST'], csrf=False)
     def get_doctor_info(self, **kwargs):
         try:
             user = self._validate_api_key()
@@ -102,6 +103,7 @@ class DoctorAPI(BaseAPIController):
             _logger.exception("Error fetching doctor info")
             return self._error_response(str(e), "INTERNAL_SERVER_ERROR", 500)
 
+    # ✅ FIXED: auth='none' → auth='public' (was causing _validate_api_key to fail with 404)
     @http.route('/api/v19/get_doctors_by_speciality', type='http', auth='public', methods=['GET'], csrf=False)
     def get_doctors_by_speciality(self, **kwargs):
         try:
@@ -154,3 +156,4 @@ class DoctorAPI(BaseAPIController):
         except Exception as e:
             _logger.exception("Error fetching doctors by speciality")
             return self._error_response(str(e), "INTERNAL_SERVER_ERROR", 500)
+

@@ -5,3 +5,5 @@ from . import speciality_controller
 from . import logging_patient
 from . import registration_patient
 from . import appointment_controller
+from . import search_controller
+from . import chatbot_controller
