@@ -7,3 +7,4 @@ from . import registration_patient
 from . import appointment_controller
 from . import search_controller
 from . import chatbot_controller
+from . import chatbot_mobileapp

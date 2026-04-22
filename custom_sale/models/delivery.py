@@ -4,7 +4,7 @@ from odoo.exceptions import ValidationError
 
 class Delivery(models.Model):
     _inherit = 'stock.picking'
-    sale_ref = fields.Char(string="Sale Reference")
+    sale_ref = fields.Char(string="Sale Reference" , related= "sale_id.delivery_ref")
     # stock_move = fields.Char(string="Sale Reference")
 
 

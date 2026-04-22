@@ -3,6 +3,7 @@ from odoo.http import request
 from .base_controller import BaseAPIController
 import logging
 import json
+
 _logger = logging.getLogger(__name__)
 
 
@@ -183,6 +184,7 @@ class PatientAPI(BaseAPIController):
                 "INTERNAL_SERVER_ERROR",
                 500
             )
+
     @http.route('/api/v19/patient/info', type='http', auth='none', methods=['POST'], csrf=False)
     def get_patient_info(self, **kwargs):
         try:

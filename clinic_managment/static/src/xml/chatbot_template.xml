@@ -2,106 +2,559 @@
 <templates xml:space="preserve">
 
 <t t-name="clinic_managment.ClinicChatbot" owl="1">
-    <div class="clinic-chatbot-wrapper">
+<div class="clinic-chatbot-wrapper">
 
-        <!-- Floating trigger button -->
-        <button class="chatbot-fab"
-                t-att-class="state.open ? 'chatbot-fab--open' : ''"
-                t-on-click="toggleChat">
-            <span t-if="!state.open">💬</span>
-            <span t-if="state.open">✕</span>
-        </button>
+    <!-- ── Floating trigger button ── -->
+    <button class="chatbot-fab"
+            t-att-class="state.open ? 'chatbot-fab--open' : ''"
+            t-on-click="toggleChat">
+        <span t-if="!state.open">💬</span>
+        <span t-if="state.open">✕</span>
+    </button>
 
-        <!-- Chat panel -->
-        <div t-if="state.open" class="chatbot-panel">
+    <!-- ── Panel ── -->
+    <div t-if="state.open" class="chatbot-panel">
 
-            <!-- Header -->
-            <div class="chatbot-header">
-                <div class="chatbot-avatar">🩺</div>
-                <div class="chatbot-header-info">
-                    <div class="chatbot-header-name">Clinic Assistant</div>
-                    <div class="chatbot-header-status">
-                        <span class="chatbot-status-dot"/>
-                        Always here to help
-                    </div>
-                </div>
-                <div class="chatbot-header-actions">
-                    <!-- Back button: resets to welcome screen -->
-                    <button class="chatbot-hbtn" t-on-click="clearChat" title="Back to start">←</button>
-                    <!-- Close button -->
-                    <button class="chatbot-hbtn" t-on-click="toggleChat" title="Close">✕</button>
+        <!-- Header -->
+        <div class="chatbot-header">
+            <div class="chatbot-avatar">🩺</div>
+            <div class="chatbot-header-info">
+                <div class="chatbot-header-name">Clinic Assistant</div>
+                <div class="chatbot-header-status">
+                    <span class="chatbot-status-dot"/>
+                    Always here to help
                 </div>
             </div>
+            <div class="chatbot-header-actions">
+                <button class="chatbot-hbtn" t-on-click="_goHome" title="Home">⌂</button>
+                <button class="chatbot-hbtn" t-on-click="clearChat" title="New chat">↺</button>
+                <button class="chatbot-hbtn" t-on-click="toggleChat" title="Close">✕</button>
+            </div>
+        </div>
 
-            <!-- Messages -->
-            <div class="chatbot-messages" t-ref="messages">
+        <!-- Breadcrumb -->
+        <div class="chatbot-breadcrumb" t-if="showBreadcrumb">
+            <span class="chatbot-bc-item" t-on-click="_goHome">Home</span>
+            <t t-foreach="state.breadcrumbs" t-as="crumb" t-key="crumb_index">
+                <span class="chatbot-bc-sep">›</span>
+                <span class="chatbot-bc-item"
+                      t-if="crumb_index &lt; state.breadcrumbs.length - 1"
+                      t-on-click="() => { state.view = crumb.view; state.breadcrumbs = state.breadcrumbs.slice(0, crumb_index); }">
+                    <t t-esc="crumb.label"/>
+                </span>
+                <span class="chatbot-bc-current"
+                      t-if="crumb_index === state.breadcrumbs.length - 1">
+                    <t t-esc="crumb.label"/>
+                </span>
+            </t>
+        </div>
 
-                <!-- Quick action chips — only show on welcome screen -->
-                <t t-if="state.messages.length &lt;= 1">
-                    <div class="chatbot-chips">
-                        <span class="chatbot-chip"
-                              t-on-click="sendQuickAction"
-                              data-action="I want to book an appointment">
-                            📅 Book Appointment
-                        </span>
-                        <span class="chatbot-chip"
-                              t-on-click="sendQuickAction"
-                              data-action="Show me appointment records for a patient">
-                            📋 View Records
-                        </span>
-                        <span class="chatbot-chip"
-                              t-on-click="sendQuickAction"
-                              data-action="Check doctor availability">
-                            🕐 Check Availability
-                        </span>
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- MAIN MENU                                          -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isMenu" class="chatbot-body chatbot-view">
+            <div class="chatbot-menu">
+                <div class="chatbot-menu-title">What can I help you with?</div>
+
+                <div class="chatbot-menu-grid">
+                    <div class="chatbot-menu-card" t-on-click="openBookFlow">
+                        <div class="chatbot-menu-icon">📅</div>
+                        <div class="chatbot-menu-label">Book Appointment</div>
+                        <div class="chatbot-menu-desc">Schedule with a doctor</div>
                     </div>
-                </t>
 
-                <!-- Message bubbles -->
-                <t t-foreach="state.messages" t-as="msg" t-key="msg_index">
-                    <div t-att-class="'chatbot-msg chatbot-msg--' + msg.role">
-                        <t t-if="msg.role === 'assistant'">
-                            <div class="chatbot-bot-avatar">🩺</div>
-                        </t>
-                        <!-- t-out renders formatted HTML safely (escaped then markup applied) -->
-                        <div class="chatbot-bubble" t-out="formatText(msg.text)"/>
-                        <t t-if="msg.role === 'user'">
-                            <div class="chatbot-user-avatar">👤</div>
-                        </t>
+                    <div class="chatbot-menu-card" t-on-click="openRecordsFlow">
+                        <div class="chatbot-menu-icon">📋</div>
+                        <div class="chatbot-menu-label">View Records</div>
+                        <div class="chatbot-menu-desc">Patient or doctor history</div>
                     </div>
-                </t>
 
-                <!-- Typing indicator -->
-                <t t-if="state.loading">
-                    <div class="chatbot-msg chatbot-msg--assistant">
-                        <div class="chatbot-bot-avatar">🩺</div>
-                        <div class="chatbot-bubble chatbot-bubble--typing">
-                            <span/><span/><span/>
+                    <div class="chatbot-menu-card" t-on-click="openAvailFlow">
+                        <div class="chatbot-menu-icon">🕐</div>
+                        <div class="chatbot-menu-label">Availability</div>
+                        <div class="chatbot-menu-desc">Check doctor schedule</div>
+                    </div>
+
+                    <div class="chatbot-menu-card" t-on-click="openOpenFlow">
+                        <div class="chatbot-menu-icon">📂</div>
+                        <div class="chatbot-menu-label">Open Record</div>
+                        <div class="chatbot-menu-desc">Jump to any record</div>
+                    </div>
+
+                    <div class="chatbot-menu-card chatbot-menu-card--full" t-on-click="openNavFlow">
+                        <div class="chatbot-menu-icon">🔗</div>
+                        <div>
+                            <div class="chatbot-menu-label">Navigate</div>
+                            <div class="chatbot-menu-desc">Go to any section of the clinic system</div>
                         </div>
                     </div>
-                </t>
-
+                </div>
             </div>
-
-            <!-- Input bar -->
-            <div class="chatbot-inputbar">
-                <button
-                    t-att-class="state.listening ? 'chatbot-micbtn chatbot-micbtn--active' : 'chatbot-micbtn'"
-                    t-on-click="toggleVoice"
-                    title="Voice input">🎤</button>
-                <input
-                    t-ref="input"
-                    class="chatbot-input"
-                    placeholder="Type or speak your request..."
-                    t-att-value="state.message"
-                    t-on-input="onInputChange"
-                    t-on-keydown="onInputKeydown"
-                />
-                <button class="chatbot-sendbtn" t-on-click="sendMessage">➤</button>
-            </div>
-
         </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → DOCTOR SELECTION                            -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookDoctor" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">
+                👨‍⚕️ Select a Doctor
+                <span class="chatbot-section-hdr-sub"><t t-esc="state.doctors.length"/> available</span>
+            </div>
+            <div t-if="state.doctorsLoading" class="chatbot-spinner"/>
+            <div t-else="" class="chatbot-doctor-list">
+                <t t-foreach="state.doctors" t-as="doc" t-key="doc.id">
+                    <div t-att-class="'chatbot-doctor-card' + (!doc.is_available ? ' chatbot-doctor-card--unavail' : '')"
+                         t-on-click="() => this.selectDoctor(doc)">
+                        <div class="chatbot-doc-avatar">👨‍⚕️</div>
+                        <div class="chatbot-doc-info">
+                            <div class="chatbot-doc-name">Dr. <t t-esc="doc.name"/></div>
+                            <div class="chatbot-doc-spec"><t t-esc="doc.speciality"/></div>
+                            <div class="chatbot-doc-meta">
+                                <span t-att-class="'chatbot-doc-pill ' + (doc.is_available ? 'chatbot-doc-pill--avail' : 'chatbot-doc-pill--unavail')">
+                                    <t t-if="doc.is_available">● Available</t>
+                                    <t t-else="">● Unavailable</t>
+                                </span>
+                                <span t-if="doc.fees and doc.fees !== '0'" class="chatbot-doc-pill chatbot-doc-pill--fees">
+                                    ₹<t t-esc="doc.fees"/>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="chatbot-doc-chevron">›</div>
+                    </div>
+                </t>
+                <div t-if="!state.doctorsLoading and state.doctors.length === 0" class="chatbot-empty">
+                    <div class="chatbot-empty-icon">🏥</div>
+                    <div class="chatbot-empty-text">No doctors found</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → DATE SELECTION                              -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookDate" class="chatbot-body chatbot-view">
+            <div class="chatbot-info-box" t-if="state.booking.doctor">
+                Booking with <strong>Dr. <t t-esc="state.booking.doctor.name"/></strong>
+                — <t t-esc="state.booking.doctor.speciality"/>
+            </div>
+            <div class="chatbot-section-hdr">📅 Choose a Date</div>
+            <div class="chatbot-date-scroll">
+                <t t-foreach="dateChips" t-as="chip" t-key="chip.value">
+                    <div t-att-class="'chatbot-date-chip' + (state.booking.date === chip.value ? ' chatbot-date-chip--active' : '')"
+                         t-on-click="() => this.selectDate(chip)">
+                        <div class="chatbot-date-day"><t t-esc="chip.label"/></div>
+                        <div class="chatbot-date-num"><t t-esc="chip.num"/></div>
+                        <div class="chatbot-date-day"><t t-esc="chip.month"/></div>
+                    </div>
+                </t>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → TIME SELECTION                              -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookTime" class="chatbot-body chatbot-view">
+            <div class="chatbot-info-box" t-if="state.booking.doctor">
+                Dr. <strong><t t-esc="state.booking.doctor.name"/></strong>
+                · <t t-esc="state.booking.dateLabel"/>
+            </div>
+            <div t-if="state.slotsLoading" class="chatbot-spinner"/>
+            <div t-else="">
+                <!-- Morning -->
+                <div class="chatbot-time-section" t-if="timeSlots.morning.length">
+                    <div class="chatbot-time-label">☀️ Morning</div>
+                    <div class="chatbot-time-grid">
+                        <t t-foreach="timeSlots.morning" t-as="slot" t-key="slot.value">
+                            <div t-att-class="'chatbot-time-slot'
+                                + (isSlotBooked(slot.value) ? ' chatbot-time-slot--booked' : '')
+                                + (state.booking.time === slot.value ? ' chatbot-time-slot--active' : '')"
+                                 t-on-click="() => this.selectTime(slot)">
+                                <t t-esc="slot.label"/>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+                <!-- Afternoon -->
+                <div class="chatbot-time-section" t-if="timeSlots.afternoon.length">
+                    <div class="chatbot-time-label">🌤 Afternoon</div>
+                    <div class="chatbot-time-grid">
+                        <t t-foreach="timeSlots.afternoon" t-as="slot" t-key="slot.value">
+                            <div t-att-class="'chatbot-time-slot'
+                                + (isSlotBooked(slot.value) ? ' chatbot-time-slot--booked' : '')
+                                + (state.booking.time === slot.value ? ' chatbot-time-slot--active' : '')"
+                                 t-on-click="() => this.selectTime(slot)">
+                                <t t-esc="slot.label"/>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+                <!-- Evening -->
+                <div class="chatbot-time-section" t-if="timeSlots.evening.length">
+                    <div class="chatbot-time-label">🌙 Evening</div>
+                    <div class="chatbot-time-grid">
+                        <t t-foreach="timeSlots.evening" t-as="slot" t-key="slot.value">
+                            <div t-att-class="'chatbot-time-slot'
+                                + (isSlotBooked(slot.value) ? ' chatbot-time-slot--booked' : '')
+                                + (state.booking.time === slot.value ? ' chatbot-time-slot--active' : '')"
+                                 t-on-click="() => this.selectTime(slot)">
+                                <t t-esc="slot.label"/>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → PATIENT CODE                                -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookPatient" class="chatbot-body chatbot-view">
+            <div class="chatbot-info-box" t-if="state.booking.doctor">
+                Dr. <strong><t t-esc="state.booking.doctor.name"/></strong>
+                · <t t-esc="state.booking.dateLabel"/>
+                · <strong><t t-esc="state.booking.timeLabel"/></strong>
+            </div>
+            <div class="chatbot-section-hdr">🪪 Patient Code</div>
+            <div class="chatbot-input-group">
+                <label class="chatbot-input-label">Enter Patient Code (e.g. PAT0042)</label>
+                <input class="chatbot-field chatbot-field--code"
+                       type="text"
+                       placeholder="PAT0001"
+                       t-att-value="state.booking.patientCode"
+                       t-on-input="onCodeChange"
+                       autocomplete="off"
+                       autofocus="autofocus"/>
+            </div>
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--ghost" t-on-click="_goBack">← Back</button>
+                <button class="chatbot-btn chatbot-btn--primary"
+                        t-on-click="goToNotes"
+                        t-att-disabled="!state.booking.patientCode">
+                    Continue →
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → NOTES                                       -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookNotes" class="chatbot-body chatbot-view">
+            <div class="chatbot-info-box" t-if="state.booking.doctor">
+                Patient <strong><t t-esc="state.booking.patientCode"/></strong>
+                · Dr. <strong><t t-esc="state.booking.doctor.name"/></strong>
+            </div>
+            <div class="chatbot-section-hdr">
+                📝 Notes
+                <span class="chatbot-section-hdr-sub">Optional</span>
+            </div>
+            <div class="chatbot-input-group">
+                <label class="chatbot-input-label">Add any notes or reason for visit</label>
+                <textarea class="chatbot-field"
+                          placeholder="e.g. Follow-up, pain in left knee..."
+                          t-att-value="state.booking.notes"
+                          t-on-input="onNotesChange"/>
+            </div>
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--ghost" t-on-click="skipNotes">Skip</button>
+                <button class="chatbot-btn chatbot-btn--primary" t-on-click="goToConfirm">
+                    Review →
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- BOOK → CONFIRM                                     -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isBookConfirm" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">✅ Confirm Booking</div>
+
+            <t t-if="state.booking.doctor">
+                <div class="chatbot-appt-card">
+                    <div class="chatbot-appt-card-hdr">
+                        <div class="chatbot-appt-card-icon">📋</div>
+                        <div>
+                            <div class="chatbot-appt-card-title">Appointment Details</div>
+                            <div class="chatbot-appt-card-sub">Review before confirming</div>
+                        </div>
+                        <div class="chatbot-appt-badge">
+                            <span class="chatbot-appt-badge-dot"/>Pending
+                        </div>
+                    </div>
+
+                    <div class="chatbot-appt-row">
+                        <div class="chatbot-appt-row-icon">👨‍⚕️</div>
+                        <div class="chatbot-appt-row-key">Doctor</div>
+                        <div class="chatbot-appt-row-val">
+                            Dr. <t t-esc="state.booking.doctor.name"/>
+                            · <t t-esc="state.booking.doctor.speciality"/>
+                        </div>
+                    </div>
+
+                    <div class="chatbot-appt-row">
+                        <div class="chatbot-appt-row-icon">📅</div>
+                        <div class="chatbot-appt-row-key">Date</div>
+                        <div class="chatbot-appt-row-val"><t t-esc="state.booking.dateLabel"/></div>
+                    </div>
+
+                    <div class="chatbot-appt-row">
+                        <div class="chatbot-appt-row-icon">🕐</div>
+                        <div class="chatbot-appt-row-key">Time</div>
+                        <div class="chatbot-appt-row-val"><t t-esc="state.booking.timeLabel"/></div>
+                    </div>
+
+                    <div class="chatbot-appt-row">
+                        <div class="chatbot-appt-row-icon">🪪</div>
+                        <div class="chatbot-appt-row-key">Patient</div>
+                        <div class="chatbot-appt-row-val"><t t-esc="state.booking.patientCode"/></div>
+                    </div>
+
+                    <t t-if="state.booking.notes">
+                        <div class="chatbot-appt-row">
+                            <div class="chatbot-appt-row-icon">📝</div>
+                            <div class="chatbot-appt-row-key">Notes</div>
+                            <div class="chatbot-appt-row-val"><t t-esc="state.booking.notes"/></div>
+                        </div>
+                    </t>
+
+                    <div class="chatbot-appt-footer">
+                        <div class="chatbot-appt-fee-box">
+                            <span style="font-size:14px">💳</span>
+                            <div class="chatbot-appt-fee-lbl">Consultation Fees</div>
+                            <div class="chatbot-appt-fee-val">
+                                ₹<t t-esc="state.booking.doctor.fees or '0'"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+
+            <t t-else="">
+                <div class="chatbot-info-box">⚠️ Booking details missing. Please start again.</div>
+            </t>
+
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--danger" t-on-click="openBookFlow">✕ Cancel</button>
+                <button class="chatbot-btn chatbot-btn--primary"
+                        t-on-click="confirmBooking"
+                        t-att-disabled="state.loading or !state.booking.doctor">
+                    <t t-if="state.loading">Booking...</t>
+                    <t t-else="">✅ Confirm</t>
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- RECORDS → TYPE PICKER                              -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isRecordsType" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">📋 View Records</div>
+            <div class="chatbot-pills">
+                <div t-att-class="'chatbot-pill' + (state.recordsType === 'patient' ? ' chatbot-pill--active' : '')"
+                     t-on-click="() => this.setRecordsType('patient')">👤 Patient</div>
+                <div t-att-class="'chatbot-pill' + (state.recordsType === 'doctor' ? ' chatbot-pill--active' : '')"
+                     t-on-click="() => this.setRecordsType('doctor')">👨‍⚕️ Doctor</div>
+            </div>
+            <div class="chatbot-input-group">
+                <label class="chatbot-input-label" t-if="state.recordsType === 'patient'">
+                    Enter Patient Code (e.g. PAT0042)
+                </label>
+                <label class="chatbot-input-label" t-else="">
+                    Enter Doctor Name (e.g. Ahmed)
+                </label>
+                <input t-att-class="'chatbot-field' + (state.recordsType === 'patient' ? ' chatbot-field--code' : '')"
+                       type="text"
+                       t-att-placeholder="state.recordsType === 'patient' ? 'PAT0001' : 'Dr. Name'"
+                       t-att-value="state.recordsInput"
+                       t-on-input="onRecordsInputChange"
+                       autocomplete="off"/>
+            </div>
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--ghost" t-on-click="_goHome">← Back</button>
+                <button class="chatbot-btn chatbot-btn--primary" t-on-click="fetchRecords">
+                    Fetch Records →
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- AVAILABILITY → DOCTOR SELECTION                    -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isAvailDoctor" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">🕐 Check Availability</div>
+            <div t-if="state.doctorsLoading" class="chatbot-spinner"/>
+            <div t-else="" class="chatbot-doctor-list">
+                <t t-foreach="state.doctors" t-as="doc" t-key="doc.id">
+                    <div class="chatbot-doctor-card" t-on-click="() => this.selectAvailDoctor(doc)">
+                        <div class="chatbot-doc-avatar">👨‍⚕️</div>
+                        <div class="chatbot-doc-info">
+                            <div class="chatbot-doc-name">Dr. <t t-esc="doc.name"/></div>
+                            <div class="chatbot-doc-spec"><t t-esc="doc.speciality"/></div>
+                            <div class="chatbot-doc-meta">
+                                <span t-att-class="'chatbot-doc-pill ' + (doc.is_available ? 'chatbot-doc-pill--avail' : 'chatbot-doc-pill--unavail')">
+                                    <t t-if="doc.is_available">● Available</t>
+                                    <t t-else="">● Unavailable</t>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="chatbot-doc-chevron">›</div>
+                    </div>
+                </t>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- AVAILABILITY → DATE (OPTIONAL)                     -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isAvailDate" class="chatbot-body chatbot-view">
+            <div class="chatbot-info-box" t-if="state.availDoctor">
+                Checking schedule for <strong>Dr. <t t-esc="state.availDoctor.name"/></strong>
+            </div>
+            <div class="chatbot-section-hdr">
+                📅 Choose a Date
+                <span class="chatbot-section-hdr-sub">Optional</span>
+            </div>
+            <div class="chatbot-date-scroll">
+                <t t-foreach="dateChips" t-as="chip" t-key="chip.value">
+                    <div t-att-class="'chatbot-date-chip' + (state.availDate === chip.value ? ' chatbot-date-chip--active' : '')"
+                         t-on-click="() => { state.availDate = chip.value; }">
+                        <div class="chatbot-date-day"><t t-esc="chip.label"/></div>
+                        <div class="chatbot-date-num"><t t-esc="chip.num"/></div>
+                        <div class="chatbot-date-day"><t t-esc="chip.month"/></div>
+                    </div>
+                </t>
+            </div>
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--ghost"
+                        t-on-click="() => this.checkAvail('')">Any Date</button>
+                <button class="chatbot-btn chatbot-btn--primary"
+                        t-on-click="() => this.checkAvail(state.availDate)">
+                    Check →
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- NAVIGATE                                           -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isNav" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">🔗 Navigate To</div>
+            <div class="chatbot-nav-grid">
+                <div class="chatbot-nav-card" t-on-click="() => this.doNavigate('appointments')">
+                    <div class="chatbot-nav-icon">📅</div>
+                    <div class="chatbot-nav-label">Appointments</div>
+                </div>
+                <div class="chatbot-nav-card" t-on-click="() => this.doNavigate('patients')">
+                    <div class="chatbot-nav-icon">👥</div>
+                    <div class="chatbot-nav-label">Patients</div>
+                </div>
+                <div class="chatbot-nav-card" t-on-click="() => this.doNavigate('doctors')">
+                    <div class="chatbot-nav-icon">👨‍⚕️</div>
+                    <div class="chatbot-nav-label">Doctors</div>
+                </div>
+                <div class="chatbot-nav-card" t-on-click="() => this.doNavigate('consultations')">
+                    <div class="chatbot-nav-icon">📝</div>
+                    <div class="chatbot-nav-label">Consultations</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- OPEN RECORD → TYPE PICKER + INPUT                  -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isOpenType" class="chatbot-body chatbot-view">
+            <div class="chatbot-section-hdr">📂 Open a Record</div>
+            <div class="chatbot-pills">
+                <div t-att-class="'chatbot-pill' + (state.openType === 'patient' ? ' chatbot-pill--active' : '')"
+                     t-on-click="() => this.setOpenType('patient')">👤 Patient</div>
+                <div t-att-class="'chatbot-pill' + (state.openType === 'appointment' ? ' chatbot-pill--active' : '')"
+                     t-on-click="() => this.setOpenType('appointment')">📅 Appt</div>
+                <div t-att-class="'chatbot-pill' + (state.openType === 'doctor' ? ' chatbot-pill--active' : '')"
+                     t-on-click="() => this.setOpenType('doctor')">👨‍⚕️ Doctor</div>
+            </div>
+            <div class="chatbot-input-group">
+                <label class="chatbot-input-label" t-if="state.openType === 'patient'">
+                    Patient Code (e.g. PAT0042)
+                </label>
+                <label class="chatbot-input-label" t-elif="state.openType === 'appointment'">
+                    Appointment Code (e.g. APPT0001)
+                </label>
+                <label class="chatbot-input-label" t-else="">Doctor Name</label>
+                <input t-att-class="'chatbot-field' + (state.openType !== 'doctor' ? ' chatbot-field--code' : '')"
+                       type="text"
+                       t-att-placeholder="state.openType === 'patient' ? 'PAT0001' : state.openType === 'appointment' ? 'APPT0001' : 'Doctor name'"
+                       t-att-value="state.openInput"
+                       t-on-input="onOpenInputChange"
+                       autocomplete="off"/>
+            </div>
+            <div class="chatbot-action-row">
+                <button class="chatbot-btn chatbot-btn--ghost" t-on-click="_goHome">← Back</button>
+                <button class="chatbot-btn chatbot-btn--primary" t-on-click="doOpenRecord">
+                    Open →
+                </button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- CHAT / MESSAGE VIEW                                -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div t-if="isChat" class="chatbot-messages" t-ref="messages">
+            <t t-foreach="state.messages" t-as="msg" t-key="msg_index">
+                <div t-att-class="'chatbot-msg chatbot-msg--' + msg.role">
+                    <t t-if="msg.role === 'assistant'">
+                        <div class="chatbot-bot-avatar">🩺</div>
+                    </t>
+                    <div class="chatbot-bubble" t-out="formatText(msg.text)"/>
+                    <t t-if="msg.role === 'user'">
+                        <div class="chatbot-user-avatar">👤</div>
+                    </t>
+                </div>
+            </t>
+
+            <!-- FIX: Live streaming bubble — text appears token by token -->
+            <t t-if="state.isStreaming and state.streamingText">
+                <div class="chatbot-msg chatbot-msg--assistant">
+                    <div class="chatbot-bot-avatar">🩺</div>
+                    <div class="chatbot-bubble chatbot-bubble--streaming" t-out="formatText(state.streamingText)"/>
+                </div>
+            </t>
+
+            <!-- Typing indicator — shown only when loading but NOT yet streaming -->
+            <t t-if="state.loading and !state.isStreaming">
+                <div class="chatbot-msg chatbot-msg--assistant">
+                    <div class="chatbot-bot-avatar">🩺</div>
+                    <div class="chatbot-bubble chatbot-bubble--typing">
+                        <span/><span/><span/>
+                    </div>
+                </div>
+            </t>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- INPUT BAR                                          -->
+        <!-- FIX: mic button disabled while loading             -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="chatbot-inputbar">
+            <!-- FIX: t-att-disabled prevents mic clicks during AI response -->
+            <button t-att-class="state.listening ? 'chatbot-micbtn chatbot-micbtn--active' : 'chatbot-micbtn'"
+                    t-on-click="toggleVoice"
+                    t-att-disabled="state.loading"
+                    t-att-title="state.loading ? 'Please wait for the response…' : state.listening ? 'Listening… click to stop' : 'Click to speak'">
+                <t t-if="state.listening">🔴</t>
+                <t t-elif="state.loading">⏳</t>
+                <t t-else="">🎤</t>
+            </button>
+            <input class="chatbot-input"
+                   placeholder="Type a message or use 🎤…"
+                   t-att-value="state.message"
+                   t-on-input="onInputChange"
+                   t-on-keydown="onInputKeydown"/>
+            <button class="chatbot-sendbtn"
+                    t-on-click="sendMessage"
+                    t-att-disabled="state.loading">➤</button>
+        </div>
+
     </div>
+</div>
 </t>
 
 </templates>

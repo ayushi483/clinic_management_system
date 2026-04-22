@@ -13,7 +13,15 @@ class SaleOrder(models.Model):
         res['sale_reference'] = self.invoice_ref
         return res
 
+    def action_confirm(self):
+        res = super().action_confirm()
+        if self.picking_ids:
+            self.picking_ids.update({"sale_reference": self.delivery_reference})
 
+            for picking in self.picking_ids:
+                for move in picking.move_ids:
+                    move.update({"sale_line_reference": move.sale_line_id.stock_move_reference})
+        return res
 
 
 class SaleOrderLine(models.Model):
