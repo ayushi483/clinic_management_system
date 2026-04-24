@@ -32,6 +32,19 @@
             </div>
         </div>
 
+        <!-- ── MEMORY INDICATOR BANNER ── -->
+        <div t-if="state.activePatientCode" class="chatbot-memory-banner">
+            <span class="chatbot-memory-icon">🧠</span>
+            <span class="chatbot-memory-text">
+                Memory active: <strong t-esc="state.activePatientCode"/>
+                <t t-if="state.memoryLoaded">
+                    · <span class="chatbot-memory-count"><t t-esc="state.memoryCount"/> past msg(s)</span>
+                </t>
+                <t t-else="">· New session</t>
+            </span>
+            <button class="chatbot-memory-clear" t-on-click="clearPatientMemory" title="Clear memory for this patient">🗑️</button>
+        </div>
+
         <!-- Breadcrumb -->
         <div class="chatbot-breadcrumb" t-if="showBreadcrumb">
             <span class="chatbot-bc-item" t-on-click="_goHome">Home</span>
@@ -242,6 +255,9 @@
             <div class="chatbot-info-box" t-if="state.booking.doctor">
                 Patient <strong><t t-esc="state.booking.patientCode"/></strong>
                 · Dr. <strong><t t-esc="state.booking.doctor.name"/></strong>
+            </div>
+            <div t-if="state.memoryLoaded" class="chatbot-memory-hint">
+                🧠 Past session memory loaded for this patient.
             </div>
             <div class="chatbot-section-hdr">
                 📝 Notes
@@ -499,18 +515,30 @@
         <!-- ═══════════════════════════════════════════════════ -->
         <div t-if="isChat" class="chatbot-messages" t-ref="messages">
             <t t-foreach="state.messages" t-as="msg" t-key="msg_index">
-                <div t-att-class="'chatbot-msg chatbot-msg--' + msg.role">
-                    <t t-if="msg.role === 'assistant'">
-                        <div class="chatbot-bot-avatar">🩺</div>
-                    </t>
-                    <div class="chatbot-bubble" t-out="formatText(msg.text)"/>
-                    <t t-if="msg.role === 'user'">
-                        <div class="chatbot-user-avatar">👤</div>
-                    </t>
-                </div>
+
+                <!-- System memory divider -->
+                <t t-if="msg.role === 'system-memory'">
+                    <div class="chatbot-memory-divider">
+                        <span t-out="formatText(msg.text)"/>
+                    </div>
+                </t>
+
+                <!-- Regular messages -->
+                <t t-else="">
+                    <div t-att-class="'chatbot-msg chatbot-msg--' + msg.role">
+                        <t t-if="msg.role === 'assistant'">
+                            <div class="chatbot-bot-avatar">🩺</div>
+                        </t>
+                        <div class="chatbot-bubble" t-out="formatText(msg.text)"/>
+                        <t t-if="msg.role === 'user'">
+                            <div class="chatbot-user-avatar">👤</div>
+                        </t>
+                    </div>
+                </t>
+
             </t>
 
-            <!-- FIX: Live streaming bubble — text appears token by token -->
+            <!-- Live streaming bubble -->
             <t t-if="state.isStreaming and state.streamingText">
                 <div class="chatbot-msg chatbot-msg--assistant">
                     <div class="chatbot-bot-avatar">🩺</div>
@@ -518,7 +546,7 @@
                 </div>
             </t>
 
-            <!-- Typing indicator — shown only when loading but NOT yet streaming -->
+            <!-- Typing indicator -->
             <t t-if="state.loading and !state.isStreaming">
                 <div class="chatbot-msg chatbot-msg--assistant">
                     <div class="chatbot-bot-avatar">🩺</div>
@@ -531,10 +559,8 @@
 
         <!-- ═══════════════════════════════════════════════════ -->
         <!-- INPUT BAR                                          -->
-        <!-- FIX: mic button disabled while loading             -->
         <!-- ═══════════════════════════════════════════════════ -->
         <div class="chatbot-inputbar">
-            <!-- FIX: t-att-disabled prevents mic clicks during AI response -->
             <button t-att-class="state.listening ? 'chatbot-micbtn chatbot-micbtn--active' : 'chatbot-micbtn'"
                     t-on-click="toggleVoice"
                     t-att-disabled="state.loading"

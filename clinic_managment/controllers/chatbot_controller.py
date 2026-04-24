@@ -237,10 +237,6 @@ def _parse_time(text):
     return None
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# CONFLICT CHECK
-# ══════════════════════════════════════════════════════════════════════════
-
 def _has_conflict(env, doctor_id, appt_utc):
     window_start = appt_utc - timedelta(seconds=59)
     window_end   = appt_utc + timedelta(seconds=59)
@@ -252,11 +248,18 @@ def _has_conflict(env, doctor_id, appt_utc):
     ], limit=1))
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# STATE MACHINE
-# ══════════════════════════════════════════════════════════════════════════
-
 def _booking_state_machine(env, user_message, state, user_tz, tz_name):
+    """
+    Returns: (reply, new_state, action, action_data, save_to_history)
+
+    FIX: The confirm step now directly calls _execute_booking_from_state
+    and returns its result WITHOUT doing an additional conflict check here.
+    Previously the flow was:
+      confirm step → calls _execute_booking → conflict check inside execute → error
+      BUT ALSO the outer _handle() was being called again on the same message → double error.
+
+    Now: confirm step → execute → single error path only.
+    """
     step = state.get('step', 'ask_patient')
 
     if step == 'ask_patient':
@@ -332,6 +335,7 @@ def _booking_state_machine(env, user_message, state, user_tz, tz_name):
     if step == 'confirm':
         msg_lower = user_message.lower().strip()
         if any(w in msg_lower for w in ['yes', 'confirm', 'ok', 'okay', 'sure', 'book', 'yep', 'yeah']):
+            # FIX: Execute and return directly — single code path, no double-error possible
             return _execute_booking_from_state(env, state, user_tz, tz_name)
         elif any(w in msg_lower for w in ['no', 'cancel', 'stop', 'abort']):
             return "Booking cancelled. Type **book appointment** to start again.", {}, None, {}, True
@@ -341,24 +345,49 @@ def _booking_state_machine(env, user_message, state, user_tz, tz_name):
 
 
 def _execute_booking_from_state(env, state, user_tz, tz_name):
+    """
+    Execute the actual booking. Returns (reply, new_state, action, action_data, save).
+
+    FIX: On any error we return ({}, ...) for new_state to clear the booking state
+    from history, so the user can start fresh without getting stuck.
+    On conflict: clear state AND give a helpful message to try a different time.
+    """
     patient = _find_patient(env, state.get('patient_code', ''))
     if not patient:
-        return f"❌ Patient {state.get('patient_code')} not found.", {}, None, {}, True
+        return (f"❌ Patient {state.get('patient_code')} not found. "
+                f"Type **book appointment** to start again.", {}, None, {}, True)
+
     doctor_id = state.get('doctor_id')
     doctor    = env['clinic.doctor'].sudo().browse(doctor_id) if doctor_id else None
     if not doctor or not doctor.exists():
-        return "❌ Doctor not found.", {}, None, {}, True
+        return ("❌ Doctor not found. Type **book appointment** to start again.",
+                {}, None, {}, True)
+
     try:
         h, mn    = map(int, state['time'].split(':'))
         dt_local = datetime.strptime(f"{state['date']} {h:02d}:{mn:02d}:00", '%Y-%m-%d %H:%M:%S')
         appt_utc = user_tz.localize(dt_local).astimezone(pytz.utc).replace(tzinfo=None)
     except Exception as e:
-        return f"❌ Could not parse appointment time: {e}", {}, None, {}, True
+        return (f"❌ Could not parse appointment time: {e}. "
+                f"Type **book appointment** to try again.", {}, None, {}, True)
+
     if appt_utc <= datetime.utcnow():
-        return "❌ That time is in the past. Type **book appointment** to try again.", {}, None, {}, True
+        return ("❌ That time is in the past. Type **book appointment** to try again.",
+                {}, None, {}, True)
+
+    # FIX: Single conflict check — only here, not duplicated upstream
     if _has_conflict(env, doctor.id, appt_utc):
-        return (f"❌ Dr. {doctor.name} already has a confirmed booking at that time. "
-                f"Please try a different time.", {}, None, {}, True)
+        try:
+            h, mn     = map(int, state['time'].split(':'))
+            disp_time = f"{h % 12 or 12}:{mn:02d} {'AM' if h < 12 else 'PM'}"
+        except Exception:
+            disp_time = state.get('time', '')
+        # Clear state so user is not stuck; ask them to re-book with different time
+        return (f"❌ **Dr. {doctor.name}** already has a confirmed booking at **{disp_time}** "
+                f"on **{state.get('date', '')}**.\n\n"
+                f"Please type **book appointment** to try a different time or date.",
+                {}, None, {}, True)
+
     appt = None
     try:
         appt = env['clinic.appointment'].sudo().with_context(tz=tz_name).create({
@@ -371,13 +400,15 @@ def _execute_booking_from_state(env, state, user_tz, tz_name):
         if appt:
             try: appt.sudo().unlink()
             except Exception: pass
-        return f"❌ {ve.args[0]}", {}, None, {}, True
+        return (f"❌ {ve.args[0]}\n\nType **book appointment** to try again.",
+                {}, None, {}, True)
     except Exception:
         _logger.exception("Booking creation failed")
         if appt:
             try: appt.sudo().unlink()
             except Exception: pass
-        return "❌ Booking failed. Please try again.", {}, None, {}, True
+        return ("❌ Booking failed. Please try again. Type **book appointment** to start over.",
+                {}, None, {}, True)
 
     display = pytz.utc.localize(appt_utc).astimezone(user_tz).strftime('%A, %B %d, %Y at %I:%M %p')
     reply = (f"✅ **Appointment Booked!**\n\n"
@@ -466,7 +497,7 @@ def _check_availability(env, doctor_name, date_str, user_tz):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# SMART INTENT ENGINE  — runs BEFORE Ollama, no LLM needed
+# SMART INTENT ENGINE
 # ══════════════════════════════════════════════════════════════════════════
 
 _NAV_LABELS = {
@@ -500,7 +531,6 @@ _NAV_PATTERNS = [
 ]
 
 def _check_nav_intent(msg):
-    """Returns (reply, 'navigate', {page}) or None."""
     m = msg.lower().strip()
     for pattern, page in _NAV_PATTERNS:
         if re.search(pattern, m):
@@ -508,55 +538,28 @@ def _check_nav_intent(msg):
     return None
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# OPEN RECORD PATTERNS  ← FIXED: added bare-code patterns for PAT / APP
-# ══════════════════════════════════════════════════════════════════════════
-
 _OPEN_PATTERNS = [
-    # ── patient ──────────────────────────────────────────────────────────
-    # "open patient PAT0042" / "show patient PAT0042"
     (r'(?:open|show|find|get|view|pull\s+up|display|fetch)\s+patient\s+(.+)',                    'patient'),
-    # "open record/profile/details of/for patient PAT0042"
     (r'(?:open|show|find|get|view)\s+(?:record|profile|details?)\s+(?:of|for)\s+patient\s+(.+)', 'patient'),
-    # "patient code PAT0042" / "patient PAT0042"
     (r'patient\s+(?:code\s+)?([A-Za-z]{2,5}[\s\-/]*\d{1,6})\b',                                 'patient'),
-    # ▶ FIX: "open PAT0042" / "open pat 42" / "open pat-0042" (bare patient code)
     (r'^(?:open|show|view|find|get)\s+(pat[\s\-/]*\d{1,6})\s*$',                                 'patient'),
-    # ▶ FIX: anywhere in sentence — "open PAT0042 please" / "get PAT0042"
     (r'(?:open|show|view|find|get)\s+(pat[\s\-/]*\d{1,6})\b',                                    'patient'),
-
-    # ── appointment ──────────────────────────────────────────────────────
-    # "open appointment APP0039"
     (r'(?:open|show|find|get|view|pull\s+up|display|fetch)\s+appointment\s+([A-Za-z0-9\-/\s]+)', 'appointment'),
-    # "appointment code APP0039"
     (r'appointment\s+(?:code\s+)?([A-Za-z]{2,5}[\s\-/]*\d{1,6})\b',                             'appointment'),
-    # ▶ FIX: "open APP0039" / "open APPT0039" / "open appt 39" (bare appointment code)
     (r'^(?:open|show|view|find|get)\s+(app[t]?[\s\-/]*\d{1,6})\s*$',                             'appointment'),
-    # ▶ FIX: anywhere in sentence
     (r'(?:open|show|view|find|get)\s+(app[t]?[\s\-/]*\d{1,6})\b',                                'appointment'),
-
-    # ── doctor ───────────────────────────────────────────────────────────
-    # "open doctor Ayush" / "open dr. Ayush"
     (r'(?:open|show|find|get|view|pull\s+up|display|fetch)\s+(?:dr\.?\s*|doctor\s+)(.+)',        'doctor'),
-    # "dr. Ayush profile/record/details/info"
     (r'(?:dr\.?\s*)([A-Za-z\s]+?)\s+(?:profile|record|details?|info)\b',                         'doctor'),
 ]
 
 
 def _check_open_intent(env, msg):
-    """
-    Returns (reply, action, action_data) tuple or None.
-    Tries every pattern in _OPEN_PATTERNS against the lowercased message.
-    On a match, resolves the identifier against the DB and returns the result.
-    """
     m = msg.lower().strip()
-
     for pattern, rtype in _OPEN_PATTERNS:
         match = re.search(pattern, m, re.I)
         if not match:
             continue
         ident = match.group(1).strip().rstrip('.')
-
         if rtype == 'patient':
             rec = _find_patient(env, ident)
             if rec:
@@ -565,11 +568,9 @@ def _check_open_intent(env, msg):
                     "open_record",
                     {"model": "clinic.patient", "record_id": rec.id},
                 )
-            # Only return a hard "not found" if the identifier looks like an actual code
             if re.search(r'\d', ident):
                 return (f"❌ No patient found with code **{_normalize_code(ident)}**.", None, {})
-            return None  # might be a general question
-
+            return None
         elif rtype == 'appointment':
             norm_ident = _normalize_code(ident)
             rec = _find_appointment(env, norm_ident)
@@ -580,7 +581,6 @@ def _check_open_intent(env, msg):
                     {"model": "clinic.appointment", "record_id": rec.id},
                 )
             return (f"❌ No appointment found: **{norm_ident}**.", None, {})
-
         elif rtype == 'doctor':
             rec = _find_doctor(env, ident)
             if rec:
@@ -589,15 +589,12 @@ def _check_open_intent(env, msg):
                     "open_record",
                     {"model": "clinic.doctor", "record_id": rec.id},
                 )
-            return None  # might be a general question about a doctor
-
+            return None
     return None
 
 
-# Records/availability inline patterns
 def _check_records_intent(env, msg, user_tz):
     m = msg.lower().strip()
-
     pat_patterns = [
         r'(?:appointments?|records?|history)\s+(?:of|for|by)\s+(?:patient\s+)?([A-Za-z0-9\-/\s]+)',
         r'(?:patient\s+)?([A-Za-z]{2,5}[\s\-/]*\d{1,6})\s+(?:appointments?|records?|history)',
@@ -609,7 +606,6 @@ def _check_records_intent(env, msg, user_tz):
             ident = match.group(1).strip()
             reply = _fetch_patient_records(env, ident, user_tz)
             return (reply, None, {})
-
     doc_patterns = [
         r'(?:appointments?|schedule|slots?)\s+(?:of|for)\s+(?:dr\.?\s*|doctor\s+)?([A-Za-z\s]+)',
         r'(?:dr\.?\s*)([A-Za-z\s]+?)\s+(?:appointments?|schedule|slots?)',
@@ -623,7 +619,6 @@ def _check_records_intent(env, msg, user_tz):
                 continue
             reply = _fetch_doctor_records(env, ident, user_tz)
             return (reply, None, {})
-
     return None
 
 
@@ -690,49 +685,54 @@ def _clean_reply(text):
     return result
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# MAIN HANDLER
-# ══════════════════════════════════════════════════════════════════════════
-
 def _handle(env, user_message, conv_history, user_tz, tz_name):
-    """Returns (reply, store_msg, action, action_data)."""
+    """
+    Returns (reply, store_msg, action, action_data).
 
-    # 1. Booking intent / active booking flow
+    FIX: Booking state check is authoritative. If there's an active booking state,
+    we route ONLY through the state machine — we do NOT fall through to other
+    intent checks. This prevents the double-response bug where the conflict
+    error was generated by the state machine AND THEN the nav/open/records
+    checks also ran and generated a second response.
+    """
+
+    # 1. Check for active booking state first — EXCLUSIVE routing
     booking_state = _parse_booking_state(conv_history)
 
-    if _is_booking_intent(user_message) and not booking_state:
-        initial_state = {'step': 'ask_patient'}
-        reply = "Sure! Let's book an appointment.\n\nPlease provide your **patient code** (e.g. PAT0042)."
-        return reply, _make_state_msg(initial_state), None, {}
-
     if booking_state and booking_state.get('step') not in (None, '', 'done'):
+        # We're mid-booking — ONLY run the state machine, nothing else
         reply, new_state, action, action_data, _ = _booking_state_machine(
             env, user_message, booking_state, user_tz, tz_name)
         store = _make_state_msg(new_state) if new_state else reply
         return reply, store, action, action_data
 
-    # 2. Open specific record  ← checked BEFORE nav so "open pat0042" doesn't
-    #    accidentally hit a nav pattern
+    # 2. New booking intent (no active state)
+    if _is_booking_intent(user_message):
+        initial_state = {'step': 'ask_patient'}
+        reply = "Sure! Let's book an appointment.\n\nPlease provide your **patient code** (e.g. PAT0042)."
+        return reply, _make_state_msg(initial_state), None, {}
+
+    # 3. Open specific record (checked BEFORE nav so "open pat0042" doesn't hit nav)
     opn = _check_open_intent(env, user_message)
     if opn:
         return opn[0], opn[0], opn[1], opn[2]
 
-    # 3. Navigate to list view
+    # 4. Navigate to list view
     nav = _check_nav_intent(user_message)
     if nav:
         return nav[0], nav[0], nav[1], nav[2]
 
-    # 4. Inline records query
+    # 5. Inline records query
     rec = _check_records_intent(env, user_message, user_tz)
     if rec:
         return rec[0], rec[0], rec[1], rec[2]
 
-    # 5. Doctor list shortcut
+    # 6. Doctor list shortcut
     if _is_doctor_query(user_message):
         reply = _format_doctor_list(env)
         return reply, reply, None, {}
 
-    # 6. Ollama free-chat fallback
+    # 7. Ollama free-chat fallback
     system_prompt, sample_code, sample_appt = _build_general_system_prompt(env)
 
     STRIP_CMDS = ('FETCH_RECORDS:', 'CHECK_AVAILABILITY:', 'NAVIGATE_TO:', 'OPEN_RECORD:')
@@ -792,9 +792,7 @@ def _handle(env, user_message, conv_history, user_tz, tz_name):
     return final_reply, final_reply, action, action_data
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Controller
-# ══════════════════════════════════════════════════════════════════════════
+
 
 class ClinicChatbotController(http.Controller):
 
@@ -968,7 +966,8 @@ class ClinicChatbotController(http.Controller):
                                         'store_msg': '', 'action': None, 'action_data': {}}})
         if _has_conflict(request.env, doctor.id, appt_utc):
             return self._json({'data': {
-                'reply': f"❌ Dr. {doctor.name} already has a confirmed booking at that time.",
+                'reply': f"❌ Dr. {doctor.name} already has a confirmed booking at that time. "
+                         f"Please select a different time slot.",
                 'store_msg': '', 'action': None, 'action_data': {}}})
         appt = None
         try:

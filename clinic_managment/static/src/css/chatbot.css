@@ -143,6 +143,65 @@
 }
 .chatbot-hbtn:hover { background: rgba(255,255,255,0.28); }
 
+/* ══════════════════════════════════════════════
+   MEMORY BANNER — sits right below the header
+   ══════════════════════════════════════════════ */
+.chatbot-memory-banner {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 13px;
+    background: linear-gradient(90deg, #f5f3ff, #ede9fe);
+    border-bottom: 1px solid #ddd6fe;
+    font-size: 11.5px;
+    color: #5b21b6;
+    flex-shrink: 0;
+    min-height: 32px;
+    animation: chatbot-fade-in 0.3s ease;
+}
+
+@keyframes chatbot-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.chatbot-memory-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.chatbot-memory-text {
+    flex: 1;
+    line-height: 1.3;
+}
+
+.chatbot-memory-count {
+    background: #c4b5fd;
+    color: #4c1d95;
+    border-radius: 20px;
+    padding: 1px 7px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.chatbot-memory-clear {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    opacity: 0.55;
+    padding: 2px 5px;
+    border-radius: 6px;
+    transition: opacity 0.2s, background 0.2s;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.chatbot-memory-clear:hover {
+    opacity: 1;
+    background: rgba(124, 58, 237, 0.12);
+}
+
 /* ── Breadcrumb ─────────────────────────────── */
 .chatbot-breadcrumb {
     padding: 7px 14px;
@@ -737,7 +796,7 @@ textarea.chatbot-field {
     border-radius: 14px 14px 4px 14px;
 }
 
-/* FIX: Streaming bubble — live token-by-token display */
+/* ── Streaming bubble ── */
 .chatbot-bubble--streaming {
     background: #fff;
     border: 1px solid #c4b5fd;
@@ -747,7 +806,6 @@ textarea.chatbot-field {
     position: relative;
 }
 
-/* Blinking cursor at the end of streaming text */
 .chatbot-bubble--streaming::after {
     content: '▋';
     color: #7c3aed;
@@ -783,6 +841,44 @@ textarea.chatbot-field {
 @keyframes chatbot-typing {
     0%, 80%, 100% { transform: scale(0.5); opacity: 0.3; }
     40%            { transform: scale(1);   opacity: 1; }
+}
+
+/* ══════════════════════════════════════════════
+   MEMORY DIVIDER — in the chat messages area
+   ══════════════════════════════════════════════ */
+.chatbot-memory-divider {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    padding: 9px 12px;
+    background: linear-gradient(90deg, #f5f3ff, #faf9ff);
+    border-left: 3px solid #7c3aed;
+    border-radius: 0 10px 10px 0;
+    font-size: 11.5px;
+    color: #5b21b6;
+    line-height: 1.5;
+    margin: 2px 0;
+    animation: chatbot-slide-in 0.3s ease;
+    word-break: break-word;
+}
+
+.chatbot-memory-divider strong {
+    color: #4c1d95;
+}
+
+/* ══════════════════════════════════════════════
+   MEMORY HINT — on booking notes screen
+   ══════════════════════════════════════════════ */
+.chatbot-memory-hint {
+    margin: 0 12px 6px;
+    padding: 7px 11px;
+    background: #f5f3ff;
+    border: 1px dashed #a78bfa;
+    border-radius: 8px;
+    font-size: 11px;
+    color: #6d28d9;
+    font-style: italic;
+    animation: chatbot-fade-in 0.3s ease;
 }
 
 /* ── INPUT BAR ──────────────────────────────── */
@@ -828,7 +924,6 @@ textarea.chatbot-field {
 }
 .chatbot-micbtn:hover:not(:disabled) { background: #f5f3ff; border-color: #7c3aed; color: #7c3aed; }
 
-/* FIX: Disabled mic state while AI is responding */
 .chatbot-micbtn:disabled {
     opacity: 0.45;
     cursor: not-allowed;

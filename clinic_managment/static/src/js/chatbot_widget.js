@@ -37,6 +37,100 @@ const VIEWS = {
 const SpeechRecognitionClass =
     window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MEMORY SYSTEM — localStorage, zero leaks
+//
+// Anti-leak rules:
+//  1. Max 60 messages per patient (oldest trimmed on every save)
+//  2. Max 50 patients total in localStorage (LRU eviction via meta index)
+//  3. Messages older than 90 days are pruned automatically on load
+//  4. _fromMemory-tagged messages are NEVER written back to storage
+//  5. Only role=user / role=assistant messages are stored (no UI dividers)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const MEM_PREFIX    = "clinic_chat:";
+const MEM_META_KEY  = "clinic_chat_meta";
+const MAX_MSGS      = 60;
+const MAX_PATIENTS  = 50;
+const EXPIRY_MS     = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+function _norm(code) {
+    return String(code).replace(/[\s\-/]/g, "").toUpperCase();
+}
+function _patKey(code) { return MEM_PREFIX + _norm(code); }
+
+function _metaLoad() {
+    try { return JSON.parse(localStorage.getItem(MEM_META_KEY) || "{}"); }
+    catch { return {}; }
+}
+function _metaSave(meta) {
+    try { localStorage.setItem(MEM_META_KEY, JSON.stringify(meta)); } catch {}
+}
+function _metaTouch(code) {
+    const meta = _metaLoad();
+    meta[_norm(code)] = Date.now();
+    const keys = Object.keys(meta);
+    if (keys.length > MAX_PATIENTS) {
+        const lru = keys.sort((a, b) => meta[a] - meta[b])[0];
+        try { localStorage.removeItem(_patKey(lru)); } catch {}
+        delete meta[lru];
+    }
+    _metaSave(meta);
+}
+function _metaRemove(code) {
+    const meta = _metaLoad();
+    delete meta[_norm(code)];
+    _metaSave(meta);
+}
+
+/** Load stored messages for a patient. Returns [] if none or expired. */
+function memLoad(patientCode) {
+    try {
+        const raw = localStorage.getItem(_patKey(patientCode));
+        if (!raw) return [];
+        const msgs   = JSON.parse(raw);
+        const cutoff = Date.now() - EXPIRY_MS;
+        return msgs.filter(m => (m.timestamp || 0) >= cutoff);
+    } catch { return []; }
+}
+
+/**
+ * Persist messages for a patient.
+ * Only real user/assistant turns are written.
+ * _fromMemory-tagged messages are excluded.
+ */
+function memSave(patientCode, visibleMessages) {
+    if (!patientCode) return;
+    try {
+        const toSave = visibleMessages
+            .filter(m =>
+                (m.role === "user" || m.role === "assistant") &&
+                !m._fromMemory
+            )
+            .slice(-MAX_MSGS)
+            .map(m => ({
+                role:      m.role,
+                text:      m.text,
+                timestamp: m.timestamp || Date.now(),
+            }));
+        localStorage.setItem(_patKey(patientCode), JSON.stringify(toSave));
+        _metaTouch(patientCode);
+    } catch (e) { console.warn("[Memory] Save failed:", e); }
+}
+
+/** Remove a patient's memory from localStorage entirely. */
+function memDelete(patientCode) {
+    try {
+        localStorage.removeItem(_patKey(patientCode));
+        _metaRemove(patientCode);
+    } catch (e) { console.warn("[Memory] Delete failed:", e); }
+}
+
+function extractPatCode(text) {
+    const m = String(text).match(/\b(PAT[\s\-/]*\d{1,6})\b/i);
+    return m ? _norm(m[1]) : null;
+}
+
 function getDateChips() {
     const chips = [], now = new Date();
     const days   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -70,7 +164,11 @@ function getTimeSlots() {
     return slots;
 }
 
-function normCode(s) { return s.replace(/[\\/\-\s]/g, "").toUpperCase(); }
+function normCode(s) { return String(s).replace(/[\\/\-\s]/g, "").toUpperCase(); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENT
+// ══════════════════════════════════════════════════════════════════════════════
 
 class ClinicChatbot extends Component {
     static template = "clinic_managment.ClinicChatbot";
@@ -79,7 +177,7 @@ class ClinicChatbot extends Component {
     setup() {
         this.state = useState({
             open: false, view: VIEWS.MENU, message: "", loading: false, listening: false,
-            messages: [{ role: "assistant", text: WELCOME_TEXT }],
+            messages: [{ role: "assistant", text: WELCOME_TEXT, timestamp: Date.now() }],
             doctors: [], doctorsLoading: false,
             booking: {
                 doctor: null, date: "", dateLabel: "",
@@ -92,6 +190,10 @@ class ClinicChatbot extends Component {
             breadcrumbs: [],
             streamingText: "",
             isStreaming:   false,
+            // memory UI
+            activePatientCode: null,
+            memoryLoaded:      false,
+            memoryCount:       0,
         });
 
         this.action      = useService("action");
@@ -100,6 +202,8 @@ class ClinicChatbot extends Component {
         this.timeSlots   = getTimeSlots();
         this.messagesRef = useRef("messages");
         this.currentRec  = null;
+        // Track which patient codes we've already shown memory for in this session
+        this._shownMemoryFor = new Set();
 
         onMounted(() => { this._scrollToBottom(); this._loadDoctors(); });
         onPatched(() => this._scrollToBottom());
@@ -152,7 +256,145 @@ class ClinicChatbot extends Component {
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // MEMORY METHODS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Activate memory for a patient.
+     *
+     * KEY FIX: We track which patients have had memory shown via _shownMemoryFor.
+     * - First time a patient code appears → load & show history, inject into Ollama context
+     * - Subsequent times (e.g. re-booking same patient) → silently update activePatientCode
+     *   so saves go to the right bucket, but DON'T re-inject the history popup
+     *
+     * This means: after a booking, if you re-book the same patient, the history is
+     * already in this.history (injected the first time), and we don't duplicate it.
+     * But if you clear chat and come back, _shownMemoryFor is reset so history shows again.
+     */
+    _activatePatientMemory(patientCode) {
+        const code = _norm(patientCode);
+        if (!code) return;
+
+        // Save previous patient before switching to a different one
+        if (this.state.activePatientCode && this.state.activePatientCode !== code) {
+            this._saveCurrentMemory();
+            // Remove old patient's memory entries from Ollama history
+            this.history = this.history.filter(m => !m._fromMemory);
+        }
+
+        this.state.activePatientCode = code;
+
+        // If we've already shown memory for this patient in this session, skip the UI injection
+        // but still keep the activePatientCode set (for saves)
+        if (this._shownMemoryFor.has(code)) {
+            return;
+        }
+
+        // Mark as shown so we don't show again during this chat session
+        this._shownMemoryFor.add(code);
+
+        const past = memLoad(code);
+
+        this.state.memoryLoaded = past.length > 0;
+        this.state.memoryCount  = past.length;
+
+        if (past.length > 0) {
+            // ── 1. Visible chat: divider ─────────────────────────────────────
+            this.state.messages = [
+                ...this.state.messages,
+                {
+                    role:      "system-memory",
+                    text:      `🧠 Memory loaded for **${code}** — ${past.length} message(s) from past session(s).`,
+                    timestamp: Date.now(),
+                },
+            ];
+
+            // ── 2. Visible chat: summary bubble ─────────────────────────────
+            const recentUserMsgs = past.filter(m => m.role === "user").slice(-5);
+            const lastDate = past[past.length - 1]?.timestamp
+                ? new Date(past[past.length - 1].timestamp).toLocaleDateString("en-IN", {
+                    day: "numeric", month: "short", year: "numeric",
+                  })
+                : "a previous session";
+            const snippets = recentUserMsgs
+                .map(m => `• "${m.text.slice(0, 70)}${m.text.length > 70 ? "…" : ""}"`)
+                .join("\n");
+
+            this.state.messages = [
+                ...this.state.messages,
+                {
+                    role:        "assistant",
+                    text:        `📂 **Past session recalled for ${code}**\n\n`
+                                 + `Last seen: **${lastDate}**\n\n`
+                                 + (snippets ? `**Recent queries:**\n${snippets}\n\n` : "")
+                                 + `How can I help you today?`,
+                    timestamp:   Date.now(),
+                    _fromMemory: true,
+                },
+            ];
+
+            // ── 3. Inject into Ollama history ─────────────────────────────────
+            this.history = this.history.filter(m => !m._fromMemory);
+
+            const injected = past.slice(-20).map(m => ({
+                role:        m.role,
+                content:     m.text,
+                _fromMemory: true,
+            }));
+
+            this.history = [
+                {
+                    role:        "system",
+                    content:     `[MEMORY] Previous conversation with patient ${code}:\n`
+                                 + injected.map(m => `${m.role}: ${m.content}`).join("\n"),
+                    _fromMemory: true,
+                },
+                ...injected,
+                ...this.history,
+            ];
+        }
+    }
+
+    /** Write current session messages to localStorage for the active patient. */
+    _saveCurrentMemory() {
+        if (!this.state.activePatientCode) return;
+        memSave(this.state.activePatientCode, this.state.messages);
+    }
+
+    /** Delete memory for the active patient and clean up UI + history. */
+    clearPatientMemory() {
+        if (!this.state.activePatientCode) return;
+        const code = this.state.activePatientCode;
+        memDelete(code);
+
+        // Also remove from shown-set so if patient is re-typed, fresh load happens
+        this._shownMemoryFor.delete(code);
+
+        this.state.messages = this.state.messages.filter(
+            m => m.role !== "system-memory" && !m._fromMemory
+        );
+        this.history = this.history.filter(m => !m._fromMemory);
+
+        this.state.memoryLoaded = false;
+        this.state.memoryCount  = 0;
+        this._pushAssistant(`🗑️ Memory cleared for patient **${code}**.`);
+    }
+
+    /**
+     * Detect patient code in any text and activate their memory.
+     * Safe to call on every message — guard inside _activatePatientMemory handles dedup.
+     */
+    _checkAndActivateMemory(text) {
+        const code = extractPatCode(text);
+        if (code) this._activatePatientMemory(code);
+        if (this.state.booking.patientCode) {
+            this._activatePatientMemory(this.state.booking.patientCode);
+        }
+    }
+
     // ── Navigation ────────────────────────────────────────────────────────────
+
     _goTo(view, crumbLabel) {
         if (crumbLabel) {
             this.state.breadcrumbs = [
@@ -177,12 +419,24 @@ class ClinicChatbot extends Component {
         this._resetBooking();
     }
 
+    /**
+     * Reset booking fields AND prune stale booking turns from Ollama history.
+     *
+     * CRITICAL FIX: We do NOT remove _fromMemory entries here.
+     * Memory context stays intact so re-booking same patient works cleanly.
+     * We only trim the real (non-memory) conversation to last 6 turns.
+     */
     _resetBooking() {
         this.state.booking = {
             doctor: null, date: "", dateLabel: "",
             time: "", timeLabel: "", patientCode: "", notes: "",
         };
         this.state.bookedSlots = [];
+
+        // Keep memory context; trim real conversation to last 6 turns only
+        const memEntries  = this.history.filter(m => m._fromMemory);
+        const realEntries = this.history.filter(m => !m._fromMemory).slice(-6);
+        this.history = [...memEntries, ...realEntries];
     }
 
     toggleChat() {
@@ -190,11 +444,22 @@ class ClinicChatbot extends Component {
         if (this.state.open && !this.state.doctors.length) this._loadDoctors();
     }
 
+    /**
+     * Save memory then fully reset UI state.
+     * Clearing _shownMemoryFor means next patient code typed will
+     * trigger a fresh localStorage load.
+     */
     clearChat() {
-        this.history             = [];
-        this.state.messages      = [{ role: "assistant", text: WELCOME_TEXT }];
-        this.state.streamingText = "";
-        this.state.isStreaming   = false;
+        this._saveCurrentMemory();
+        this.history                 = [];
+        this.state.messages          = [{ role: "assistant", text: WELCOME_TEXT, timestamp: Date.now() }];
+        this.state.streamingText     = "";
+        this.state.isStreaming       = false;
+        this.state.activePatientCode = null;
+        this.state.memoryLoaded      = false;
+        this.state.memoryCount       = 0;
+        // Reset shown-memory tracker so history shows again on next open
+        this._shownMemoryFor = new Set();
         this._goHome();
     }
 
@@ -211,14 +476,15 @@ class ClinicChatbot extends Component {
         }
     }
 
-    // ── Voice Input ───────────────────────────────────────────────────────────
+    // ── Voice ─────────────────────────────────────────────────────────────────
+
     toggleVoice() {
         if (!SpeechRecognitionClass) {
             alert("Voice input is not supported in this browser. Please use Chrome or Edge.");
             return;
         }
         if (this.state.listening) {
-            if (this.currentRec) { this.currentRec.stop(); }
+            if (this.currentRec) this.currentRec.stop();
             this.state.listening = false; this.currentRec = null; return;
         }
         const rec      = new SpeechRecognitionClass();
@@ -229,21 +495,33 @@ class ClinicChatbot extends Component {
             this.state.listening = false; this.currentRec = null;
             this.sendMessage();
         };
-        rec.onerror = rec.onend = () => { this.state.listening = false; this.currentRec = null; };
+        rec.onerror = rec.onend = () => {
+            this.state.listening = false; this.currentRec = null;
+        };
         this.currentRec = rec; this.state.listening = true; rec.start();
     }
 
     isSlotBooked(value) { return this.state.bookedSlots.includes(value); }
 
     _pushAssistant(text) {
-        this.state.messages = [...this.state.messages, { role: "assistant", text }];
+        this.state.messages = [
+            ...this.state.messages,
+            { role: "assistant", text, timestamp: Date.now() },
+        ];
     }
     _pushUser(text) {
-        this.state.messages = [...this.state.messages, { role: "user", text }];
+        this.state.messages = [
+            ...this.state.messages,
+            { role: "user", text, timestamp: Date.now() },
+        ];
     }
 
-    // ── BOOKING FLOW (GUI) ────────────────────────────────────────────────────
-    openBookFlow() { this._resetBooking(); this._goTo(VIEWS.BOOK_DOCTOR, "Menu"); }
+    // ── BOOKING FLOW ──────────────────────────────────────────────────────────
+
+    openBookFlow() {
+        this._resetBooking();
+        this._goTo(VIEWS.BOOK_DOCTOR, "Menu");
+    }
 
     selectDoctor(doc) {
         if (!doc.is_available) return;
@@ -270,6 +548,9 @@ class ClinicChatbot extends Component {
         const code = normCode(this.state.booking.patientCode);
         if (!code) { alert("Please enter a patient code."); return; }
         this.state.booking.patientCode = code;
+        // Load memory when patient enters code during booking
+        // _activatePatientMemory handles dedup — safe to call every time
+        this._activatePatientMemory(code);
         this._goTo(VIEWS.BOOK_NOTES, `Patient: ${code}`);
     }
 
@@ -281,6 +562,17 @@ class ClinicChatbot extends Component {
         return `${b.date} ${b.time}:00`;
     }
 
+    /**
+     * Confirm booking.
+     *
+     * FIX: After booking:
+     *   1. Push confirmation to chat
+     *   2. Save memory (includes confirmation message)
+     *   3. _resetBooking() clears booking fields & trims Ollama history
+     *      but KEEPS memory context — so same patient can re-book cleanly
+     *   4. _shownMemoryFor still has the patient's code, so re-opening
+     *      booking flow won't re-show the history popup
+     */
     async confirmBooking() {
         const b = this.state.booking;
         if (!b.doctor || !b.date || !b.time || !b.patientCode) return;
@@ -299,13 +591,18 @@ class ClinicChatbot extends Component {
             const reply       = d.reply       ?? "Booking failed.";
             const action      = d.action      ?? null;
             const action_data = d.action_data ?? {};
+
             this._pushAssistant(reply);
             this.history.push({ role: "assistant", content: reply });
+
+            // Save BEFORE reset — confirmation message is included in memory
+            this._saveCurrentMemory();
+
+            // Reset booking state; memory context preserved for re-booking
             this._resetBooking();
+
             this._goTo(VIEWS.CHAT, "Confirm");
-            if (action) {
-                setTimeout(() => this._handleAction(action, action_data), 1400);
-            }
+            if (action) setTimeout(() => this._handleAction(action, action_data), 1400);
         } catch (e) {
             this._pushAssistant("❌ Booking failed. Please try again.");
             this._goTo(VIEWS.CHAT, "Confirm");
@@ -315,6 +612,7 @@ class ClinicChatbot extends Component {
     }
 
     // ── RECORDS FLOW ──────────────────────────────────────────────────────────
+
     openRecordsFlow() { this.state.recordsInput = ""; this._goTo(VIEWS.RECORDS_TYPE, "Menu"); }
     setRecordsType(t) { this.state.recordsType = t; }
 
@@ -323,11 +621,13 @@ class ClinicChatbot extends Component {
         if (!inp) { alert("Please enter a patient code or doctor name."); return; }
         this.state.loading = true;
         this._goTo(VIEWS.CHAT, "Records");
+        if (this.state.recordsType === "patient") this._activatePatientMemory(inp);
         try {
             const data = await this._post("/api/v19/chatbot/records", {
                 type: this.state.recordsType, identifier: inp, tz_name: this.tz,
             });
             this._pushAssistant(data.reply ?? "No records found.");
+            this._saveCurrentMemory();
         } catch (e) {
             this._pushAssistant("❌ Error fetching records. Please try again.");
         } finally {
@@ -336,6 +636,7 @@ class ClinicChatbot extends Component {
     }
 
     // ── AVAILABILITY FLOW ─────────────────────────────────────────────────────
+
     openAvailFlow() {
         this.state.availDoctor = null; this.state.availDate = "";
         this._goTo(VIEWS.AVAIL_DOCTOR, "Menu");
@@ -352,6 +653,7 @@ class ClinicChatbot extends Component {
                 doctor_name: doc.name, date: date || "", tz_name: this.tz,
             });
             this._pushAssistant(data.reply ?? "No availability info.");
+            this._saveCurrentMemory();
         } catch (e) {
             this._pushAssistant("❌ Error checking availability.");
         } finally {
@@ -360,10 +662,12 @@ class ClinicChatbot extends Component {
     }
 
     // ── NAV FLOW ──────────────────────────────────────────────────────────────
+
     openNavFlow() { this._goTo(VIEWS.NAV, "Menu"); }
     doNavigate(page) { this._navigateTo(page); }
 
     // ── OPEN RECORD FLOW ──────────────────────────────────────────────────────
+
     openOpenFlow() { this.state.openInput = ""; this._goTo(VIEWS.OPEN_TYPE, "Menu"); }
     setOpenType(t) { this.state.openType  = t; }
 
@@ -372,14 +676,14 @@ class ClinicChatbot extends Component {
         if (!inp) { alert("Please enter a code or name."); return; }
         this.state.loading = true;
         this._goTo(VIEWS.CHAT, "Open Record");
+        if (this.state.openType === "patient") this._activatePatientMemory(inp);
         try {
             const data = await this._post("/api/v19/chatbot/open_record", {
                 type: this.state.openType, identifier: inp,
             });
             this._pushAssistant(data.reply ?? "Record not found.");
-            if (data.action) {
-                setTimeout(() => this._handleAction(data.action, data.action_data || {}), 800);
-            }
+            this._saveCurrentMemory();
+            if (data.action) setTimeout(() => this._handleAction(data.action, data.action_data || {}), 800);
         } catch (e) {
             this._pushAssistant("❌ Error opening record.");
         } finally {
@@ -387,18 +691,11 @@ class ClinicChatbot extends Component {
         }
     }
 
-    // ── Core navigation helpers ───────────────────────────────────────────────
+    // ── Core navigation ───────────────────────────────────────────────────────
 
-    /**
-     * Navigate to a module list view.
-     * Closes chatbot first, then fires doAction.
-     */
     _navigateTo(page) {
         const route = PAGE_ROUTES[page];
-        if (!route) {
-            console.warn("Unknown page:", page);
-            return;
-        }
+        if (!route) { console.warn("Unknown page:", page); return; }
         this.state.open = false;
         this.action.doAction({
             type:      "ir.actions.act_window",
@@ -410,19 +707,9 @@ class ClinicChatbot extends Component {
         });
     }
 
-    /**
-     * Open a single record in form view.
-     * ── FIX: res_id is cast to integer so Odoo accepts it correctly.
-     * ── FIX: views array uses the standard [false, "form"] tuple format.
-     * ── FIX: chatbot is closed BEFORE doAction so the navigation fires cleanly.
-     */
     _openRecord(model, recordId) {
         const id = parseInt(recordId, 10);
-        if (!model || !id) {
-            console.error("_openRecord: invalid model or id", model, recordId);
-            return;
-        }
-        // Close chatbot panel first so the form view has full screen
+        if (!model || !id) { console.error("_openRecord: invalid", model, recordId); return; }
         this.state.open = false;
         this.action.doAction({
             type:      "ir.actions.act_window",
@@ -434,18 +721,8 @@ class ClinicChatbot extends Component {
         });
     }
 
-    /**
-     * Unified action handler — single entry point for ALL server actions.
-     * Called from: _sendStreaming, confirmBooking, doOpenRecord.
-     *
-     * Supported actions:
-     *   open_appointment  → { appointment_id }
-     *   open_record       → { model, record_id }
-     *   navigate          → { page }
-     */
     _handleAction(action, action_data) {
         if (!action) return;
-
         if (action === "open_appointment" && action_data?.appointment_id) {
             this._openRecord("clinic.appointment", action_data.appointment_id);
         } else if (action === "open_record" && action_data?.model && action_data?.record_id) {
@@ -456,6 +733,7 @@ class ClinicChatbot extends Component {
     }
 
     // ── Free-text chat ────────────────────────────────────────────────────────
+
     async sendMessage() {
         const text = this.state.message.trim();
         if (!text || this.state.loading) return;
@@ -467,6 +745,8 @@ class ClinicChatbot extends Component {
 
         if (this.state.view !== VIEWS.CHAT) this._goTo(VIEWS.CHAT, "");
 
+        this._checkAndActivateMemory(text);
+
         try {
             await this._sendStreaming(text);
         } catch (err) {
@@ -477,19 +757,20 @@ class ClinicChatbot extends Component {
             this.state.isStreaming   = false;
             this.state.streamingText = "";
         }
+
+        this._saveCurrentMemory();
     }
 
     async _sendStreaming(text) {
-        const historyForServer = this.history.map(m => ({ role: m.role, content: m.content }));
+        // Strip _fromMemory before sending — server only needs role+content
+        const historyForServer = this.history.map(({ role, content }) => ({ role, content }));
 
         let res;
         try {
             res = await fetch("/api/v19/chatbot/stream", {
                 method:  "POST",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({
-                    message: text, history: historyForServer, tz_name: this.tz,
-                }),
+                body:    JSON.stringify({ message: text, history: historyForServer, tz_name: this.tz }),
             });
         } catch (e) {
             this._pushAssistant("⚠️ Cannot reach server. Please try again.");
@@ -522,10 +803,7 @@ class ClinicChatbot extends Component {
                     if (dataStr === "[DONE]") break;
                     try {
                         const parsed = JSON.parse(dataStr);
-                        if (parsed.token      !== undefined) {
-                            fullText += parsed.token;
-                            this.state.streamingText = fullText;
-                        }
+                        if (parsed.token      !== undefined) { fullText += parsed.token; this.state.streamingText = fullText; }
                         if (parsed.action      !== undefined) action      = parsed.action;
                         if (parsed.action_data !== undefined) action_data = parsed.action_data;
                         if (parsed.store_msg   !== undefined) store_msg   = parsed.store_msg;
@@ -535,11 +813,8 @@ class ClinicChatbot extends Component {
                     }
                 }
             }
-        } catch (e) {
-            // show whatever arrived
-        } finally {
-            reader.cancel().catch(() => {});
-        }
+        } catch {}
+        finally { reader.cancel().catch(() => {}); }
 
         const finalText = fullText || this.state.streamingText;
         this.state.isStreaming   = false;
@@ -550,10 +825,7 @@ class ClinicChatbot extends Component {
         const histContent = store_msg !== null ? store_msg : (finalText || "");
         this.history.push({ role: "assistant", content: histContent });
 
-        // ── FIX: give the DOM one frame to render the reply before navigating
-        if (action) {
-            setTimeout(() => this._handleAction(action, action_data), 900);
-        }
+        if (action) setTimeout(() => this._handleAction(action, action_data), 900);
     }
 
     _scrollToBottom() {
